@@ -33,16 +33,16 @@ checkboxes — with **zero external dependencies**.
 The engine is built around four small service protocols you implement in
 your app:
 
-| Protocol | What you supply |
-|---|---|
-| `WikiLinkResolver` | Resolve a `[[Name]]` to a stable opaque id |
-| `EmbeddedImageProvider` | Look up an `NSImage` for `![[Name]]` |
-| `SyntaxHighlighter` | Highlight code blocks for a given language |
-| `LatexRenderer` | Render a LaTeX string to an `NSImage` |
+| Protocol | What you supply | Suggested library |
+|---|---|---|
+| `WikiLinkResolver` | Resolve a `[[Name]]` to a stable opaque id | (your data model) |
+| `EmbeddedImageProvider` | Look up an `NSImage` for `![[Name]]` | (your asset store) |
+| `SyntaxHighlighter` | Highlight code blocks for a given language | [HighlighterSwift](https://github.com/smittytone/HighlighterSwift), [Splash](https://github.com/JohnSundell/Splash) |
+| `LatexRenderer` | Render a LaTeX string to an `NSImage` | [SwiftMath](https://github.com/mgriebling/SwiftMath) |
 
 All four ship with no-op default implementations so the editor renders
 plain Markdown out of the box. Drop in real implementations as you need
-them.
+them — the engine itself stays free of any of those transitive dependencies.
 
 ## Installation
 
