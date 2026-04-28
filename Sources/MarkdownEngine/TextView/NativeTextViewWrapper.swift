@@ -246,7 +246,9 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             }
             return
         }
-        if context.coordinator.lastSyncedText == text && !fontChanged {
+        if context.coordinator.didInitialFormatting
+            && context.coordinator.lastSyncedText == text
+            && !fontChanged {
             return
         }
         if fontChanged {
@@ -372,6 +374,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         context.coordinator.onCaretRectChange = onCaretRectChange
         context.coordinator.onInlineSelectionChange = onInlineSelectionChange
         context.coordinator.onCodeBlockSelectionChange = onCodeBlockSelectionChange
+        context.coordinator.didInitialFormatting = true
     }
 
     public func makeCoordinator() -> Coordinator {
