@@ -1,6 +1,6 @@
 //
 //  MarkdownStyler+Links.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Auto-detected URLs, [text](url) Markdown links, and [[Name]] wiki links.
 //
@@ -39,16 +39,16 @@ extension MarkdownStyler {
 
     // MARK: Wiki Links [[Name]]
 
-    static func styleNodeLinks(_ ctx: StylingContext, nodeLinkIDProvider: (NSRange) -> String?) -> [StyledRange] {
+    static func styleWikiLinks(_ ctx: StylingContext, wikiLinkIDProvider: (NSRange) -> String?) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        for (index, token) in ctx.tokens.enumerated() where token.kind == .nodeLink {
+        for (index, token) in ctx.tokens.enumerated() where token.kind == .wikiLink {
             if MarkdownDetection.isInsideCodeBlock(range: token.range, codeTokens: ctx.codeTokens) { continue }
             attrs.append((token.range, [NSAttributedString.Key.spellingState: 0]))
             let nodeName = ctx.nsText.substring(with: token.contentRange)
-            let linkID = nodeLinkIDProvider(token.range)
+            let linkID = wikiLinkIDProvider(token.range)
             var contentAttributes: [NSAttributedString.Key: Any] = [:]
             if let linkID {
-                contentAttributes[.nodeLinkID] = linkID
+                contentAttributes[.wikiLinkID] = linkID
             }
             let isActive = ctx.activeTokenIndices.contains(index)
             // Check if the linked node actually exists, using whichever resolver

@@ -1,6 +1,6 @@
 //
 //  PasteboardImageReader.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Pasteboard inspection helpers used to detect and extract images
 //  from paste / drop events into the editor.
@@ -9,11 +9,20 @@
 import AppKit
 import UniformTypeIdentifiers
 
+/// Helpers for reading images out of an `NSPasteboard`.
+///
+/// Used internally when the user pastes into the editor and externally by
+/// embedders that want to validate a pasteboard before invoking
+/// ``NativeTextViewWrapper/onPasteImage``.
 public enum PasteboardImageReader {
+    /// Returns `true` when the pasteboard carries either an image file URL
+    /// or raw image data the engine can decode.
     public static func canPasteImage(from pasteboard: NSPasteboard) -> Bool {
         imageFileURL(from: pasteboard) != nil || imageData(from: pasteboard) != nil
     }
 
+    /// First file URL on the pasteboard whose extension maps to an image
+    /// `UTType`, or `nil` if no such URL is present.
     public static func imageFileURL(from pasteboard: NSPasteboard) -> URL? {
         let options: [NSPasteboard.ReadingOptionKey: Any] = [
             .urlReadingFileURLsOnly: true
@@ -28,6 +37,11 @@ public enum PasteboardImageReader {
         })
     }
 
+    /// PNG-encoded image data extracted from the pasteboard, or `nil` when
+    /// no decodable image is available.
+    ///
+    /// Tries `.png`, then `.tiff`, then any registered `NSImage` initializer,
+    /// then falls back to scanning every type the pasteboard advertises.
     public static func imageData(from pasteboard: NSPasteboard) -> Data? {
         if let pngData = pasteboard.data(forType: .png), !pngData.isEmpty {
             return pngData

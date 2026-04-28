@@ -1,6 +1,6 @@
 //
 //  MarkdownStyler+TaskCheckboxes.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  GitHub-style `- [ ] / - [x]` task checkbox styling and strike-through.
 //

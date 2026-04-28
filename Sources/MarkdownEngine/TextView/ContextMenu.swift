@@ -1,6 +1,6 @@
 //
 //  ContextMenu.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Luca Chen on 20.06.25.
 //  Purpose: Adds a cleaner right-click menu with Markdown formatting actions.

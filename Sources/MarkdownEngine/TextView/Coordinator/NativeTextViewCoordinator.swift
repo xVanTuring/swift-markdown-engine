@@ -1,6 +1,6 @@
 //
 //  NativeTextViewCoordinator.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Luca Chen on 18.02.26.
 //
@@ -10,10 +10,17 @@
 import AppKit
 import SwiftUI
 
+/// `NSTextViewDelegate` that bridges ``NativeTextViewWrapper`` and the
+/// underlying `NSTextView`.
+///
+/// The coordinator is created automatically by SwiftUI; embedders never
+/// construct one directly. Behaviors that don't fit in the main file live
+/// in extensions (Autocorrect, CodeBlocks, Find, InlineSelection,
+/// Notifications, Restyling, TextDelegate, WritingTools).
 public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
-    var nodeId: String?
+    var documentId: String?
     @Binding var text: String
-    @Binding var isNodeActive: Bool
+    @Binding var isWikiLinkActive: Bool
     var fontName: String
     var fontSize: CGFloat
     var configuration: MarkdownEditorConfiguration = .default {
@@ -31,7 +38,7 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     var lastSyncedText: String
     var isProgrammaticEdit: Bool = false
     var isWritingToolsActive: Bool = false
-    var wtStartNodeId: String?
+    var wtStartDocumentId: String?
     weak var wtChildWindow: NSWindow?
     var wtInitialChildOrigin: CGPoint?
     var wtInitialSelectionRange: NSRange?
@@ -40,7 +47,7 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     var lastAppliedInlineReplacementID: UUID?
     var activeTokenIndices: Set<Int> = []
     var previousActiveTokenIndices: Set<Int> = []
-    var nodeLinkMetadata: [WikiLinkService.RangeKey: WikiLinkService.LinkMetadata] = [:]
+    var wikiLinkMetadata: [WikiLinkService.RangeKey: WikiLinkService.LinkMetadata] = [:]
     var previousBacktickCount: Int = 0
 
     var pendingEditedRange: NSRange? = nil
@@ -58,25 +65,25 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
         let codeTokens: [MarkdownToken]
         let latexTokens: [MarkdownToken]
         let blockLatexTokens: [MarkdownToken]
-        let nodeLinkTokens: [MarkdownToken]
+        let wikiLinkTokens: [MarkdownToken]
         let imageEmbedTokens: [MarkdownToken]
     }
 
     enum InlineTokenContext {
-        case nodeLink(token: MarkdownToken)
+        case wikiLink(token: MarkdownToken)
         case imageEmbed(token: MarkdownToken)
 
         var token: MarkdownToken {
             switch self {
-            case .nodeLink(let token), .imageEmbed(let token):
+            case .wikiLink(let token), .imageEmbed(let token):
                 return token
             }
         }
 
         var selectionKind: InlineSelectionKind {
             switch self {
-            case .nodeLink:
-                return .nodeLink
+            case .wikiLink:
+                return .wikiLink
             case .imageEmbed:
                 return .imageEmbed
             }
@@ -92,13 +99,13 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     init(text: Binding<String>,
          fontName: String,
          fontSize: CGFloat,
-         isNodeActive: Binding<Bool>,
+         isWikiLinkActive: Binding<Bool>,
          onLinkClick: ((String) -> Void)?,
          onInlineSelectionChange: ((InlineSelectionState?) -> Void)?) {
         _text = text
         self.fontName = fontName
         self.fontSize = fontSize
-        _isNodeActive = isNodeActive
+        _isWikiLinkActive = isWikiLinkActive
         self.onLinkClick = onLinkClick
         self.onCaretRectChange = nil
         self.onInlineSelectionChange = onInlineSelectionChange
@@ -158,16 +165,16 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     // Find-in-document highlight handlers live in
     // `NativeTextViewCoordinator+Find.swift`.
 
-    func nodeLinkID(for range: NSRange) -> String? {
-        nodeLinkMetadata[WikiLinkService.RangeKey(range)]?.id
+    func wikiLinkID(for range: NSRange) -> String? {
+        wikiLinkMetadata[WikiLinkService.RangeKey(range)]?.id
     }
 
     func storageRange(forDisplayRange range: NSRange) -> NSRange? {
-        nodeLinkMetadata[WikiLinkService.RangeKey(range)]?.storageRange
+        wikiLinkMetadata[WikiLinkService.RangeKey(range)]?.storageRange
     }
 
     func storageRange(containingDisplayLocation location: Int) -> NSRange? {
-        for (key, value) in nodeLinkMetadata {
+        for (key, value) in wikiLinkMetadata {
             let displayRange = NSRange(location: key.location, length: key.length)
             if NSLocationInRange(location, displayRange) {
                 return value.storageRange

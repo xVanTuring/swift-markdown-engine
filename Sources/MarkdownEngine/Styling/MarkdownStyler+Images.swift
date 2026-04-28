@@ -1,6 +1,6 @@
 //
 //  MarkdownStyler+Images.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Image embed (`![[...]]`) styling and layout.
 //

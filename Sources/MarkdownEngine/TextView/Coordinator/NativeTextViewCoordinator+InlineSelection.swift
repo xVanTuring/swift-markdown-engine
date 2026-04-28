@@ -14,7 +14,7 @@ extension NativeTextViewCoordinator {
 
     /// Recompute the preview anchor for the active inline token (used when scrolling).
     func refreshActiveLinkCaretRect() {
-        guard isNodeActive || isImageEmbedActive, let tv = textView else { return }
+        guard isWikiLinkActive || isImageEmbedActive, let tv = textView else { return }
         guard let rect = inlinePreviewRect(in: tv) else { return }
         DispatchQueue.main.async { [weak self] in
             self?.onCaretRectChange?(rect)
@@ -79,13 +79,13 @@ extension NativeTextViewCoordinator {
             return .imageEmbed(token: token)
         }
 
-        for token in parsed.nodeLinkTokens {
+        for token in parsed.wikiLinkTokens {
             // Only match when the caret sits between the inner edges of `[[…]]` —
             let start = token.range.location + 2
             let end = NSMaxRange(token.range) - 2
             guard selectionLocation >= start && selectionLocation <= end else { continue }
             guard !MarkdownDetection.isInsideCodeBlock(range: token.range, codeTokens: codeTokens) else { break }
-            return .nodeLink(token: token)
+            return .wikiLink(token: token)
         }
 
         return nil

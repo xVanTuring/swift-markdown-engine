@@ -1,6 +1,6 @@
 //
 //  TextStylingService.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Luca Chen on 18.02.26.
 //
@@ -49,7 +49,7 @@ struct TextStylingService {
         paragraphStyle: NSMutableParagraphStyle,
         caretLocation: Int,
         activeTokenIndices: Set<Int>,
-        nodeLinkIDProvider: (NSRange) -> String?,
+        wikiLinkIDProvider: (NSRange) -> String?,
         precomputedTokens: [MarkdownToken]? = nil,
         configuration: MarkdownEditorConfiguration = .default
     ) {
@@ -73,7 +73,7 @@ struct TextStylingService {
             layoutBridge: layoutBridge,
             caretLocation: caretLocation,
             activeTokenIndices: activeTokenIndices,
-            nodeLinkIDProvider: nodeLinkIDProvider,
+            wikiLinkIDProvider: wikiLinkIDProvider,
             precomputedTokens: precomputedTokens,
             scopedRanges: paragraphs,
             configuration: configuration

@@ -1,6 +1,6 @@
 //
 //  MarkdownEditorServices.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Protocols and default implementations for engine-side dependencies.
 //

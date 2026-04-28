@@ -1,6 +1,6 @@
 //
 //  NativeTextViewWrapper.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Luca Chen on 18.02.26.
 //
@@ -13,36 +13,68 @@
 import SwiftUI
 import AppKit
 
+/// SwiftUI bridge for MarkdownEngine's AppKit-backed editor.
+///
+/// Wraps a TextKit 2 `NSTextView` inside an `NSScrollView` and exposes a
+/// SwiftUI-friendly API of bindings (text, link state, replacement requests)
+/// and callback closures (link clicks, caret movement, inline-selection and
+/// code-block change notifications). All visual styling and external
+/// dependencies are routed through ``MarkdownEditorConfiguration``.
 public struct NativeTextViewWrapper: NSViewRepresentable {
     public typealias Coordinator = NativeTextViewCoordinator
     public typealias NSViewType = NSScrollView
 
+    /// Two-way binding to the document text in storage form
+    /// (`[[Name|<id>]]` for wiki-links). The engine keeps display and
+    /// storage forms in sync internally.
     @Binding public var text: String
-    @Binding public var isNodeActive: Bool
+    /// Becomes `true` while the caret is inside a `[[Name]]` link's content
+    /// range, so embedders can show a contextual UI (e.g. a popover).
+    @Binding public var isWikiLinkActive: Bool
+    /// Push a replacement into the editor by setting this to a non-nil value;
+    /// the engine applies it on the next update and then clears the binding.
     @Binding public var pendingInlineReplacement: InlineReplacementRequest?
     /// The full editor configuration (theme + services + style toggles). Engine
     /// embedders construct this themselves and pass it in; the wrapper does
     /// not read UserDefaults or know about app-specific colors/services.
     public var configuration: MarkdownEditorConfiguration
+    /// PostScript name of the base font used for body text.
     public var fontName: String
+    /// Base font size in points. Headings, code blocks, and LaTeX are scaled
+    /// off this value via ``MarkdownEditorConfiguration``.
     public var fontSize: CGFloat
-    public var nodeId: String
+    /// Opaque document identifier. Changing this invalidates undo history
+    /// and resets per-document editor state.
+    public var documentId: String
+    /// When `false` the editor renders read-only with no caret.
     public var isEditable: Bool
+    /// Optional paste hook. Return a Markdown image-embed string (e.g.
+    /// `"![[my-image]]"`) to insert at the caret, or `nil` to fall through
+    /// to the system's default plain-text paste.
     public var onPasteImage: ((NSPasteboard) -> String?)?
 
+    /// Fires when the user clicks a `[[Name]]` link. The argument is the
+    /// resolved opaque identifier (or the display name when no resolver
+    /// was supplied).
     public var onLinkClick: ((String) -> Void)?
+    /// Fires whenever the caret rect inside an active wiki-link changes,
+    /// so embedders can position a follow-the-caret UI.
     public var onCaretRectChange: ((CGRect) -> Void)?
+    /// Fires when the caret enters or leaves a `[[Name]]` or `![[…]]`
+    /// token. `nil` means the caret is no longer inside such a token.
     public var onInlineSelectionChange: ((InlineSelectionState?) -> Void)?
+    /// Fires when the set of visible code blocks changes, so embedders can
+    /// overlay copy buttons (see ``CodeBlockButton``).
     public var onCodeBlockSelectionChange: (([CodeBlockSelection]) -> Void)?
 
     public init(
         text: Binding<String>,
-        isNodeActive: Binding<Bool>,
+        isWikiLinkActive: Binding<Bool>,
         pendingInlineReplacement: Binding<InlineReplacementRequest?>,
         configuration: MarkdownEditorConfiguration,
         fontName: String,
         fontSize: CGFloat = 16,
-        nodeId: String,
+        documentId: String,
         isEditable: Bool = true,
         onPasteImage: ((NSPasteboard) -> String?)? = nil,
         onLinkClick: ((String) -> Void)? = nil,
@@ -51,12 +83,12 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         onCodeBlockSelectionChange: (([CodeBlockSelection]) -> Void)? = nil
     ) {
         self._text = text
-        self._isNodeActive = isNodeActive
+        self._isWikiLinkActive = isWikiLinkActive
         self._pendingInlineReplacement = pendingInlineReplacement
         self.configuration = configuration
         self.fontName = fontName
         self.fontSize = fontSize
-        self.nodeId = nodeId
+        self.documentId = documentId
         self.isEditable = isEditable
         self.onPasteImage = onPasteImage
         self.onLinkClick = onLinkClick
@@ -138,7 +170,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         scrollView.reflectScrolledClipView(scrollView.contentView)
 
         context.coordinator.textView = textView
-        context.coordinator.nodeLinkMetadata = initialState.metadata
+        context.coordinator.wikiLinkMetadata = initialState.metadata
         context.coordinator.onCaretRectChange = onCaretRectChange
         context.coordinator.onInlineSelectionChange = onInlineSelectionChange
         context.coordinator.onCodeBlockSelectionChange = onCodeBlockSelectionChange
@@ -169,7 +201,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     public func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
 
-        let isNodeSwitch = context.coordinator.nodeId != nodeId
+        let isNodeSwitch = context.coordinator.documentId != documentId
         let wtActive: Bool = {
             if #available(macOS 15.0, *), textView.isWritingToolsActive { return true }
             return context.coordinator.isWritingToolsActive
@@ -178,7 +210,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         if wtActive && isNodeSwitch {
             // User switched files while Writing Tools was active — discard the
             // WT session so it doesn't overwrite the wrong node.
-            // Keep wtStartNodeId so textViewWritingToolsDidEnd can detect the
+            // Keep wtStartDocumentId so textViewWritingToolsDidEnd can detect the
             // node mismatch and discard the results.
             context.coordinator.isWritingToolsActive = false
         } else if wtActive {
@@ -203,7 +235,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         textView.insertionPointColor = isEditable ? context.coordinator.configuration.theme.bodyText : .clear
         let fontChanged = (context.coordinator.fontName != fontName) || (context.coordinator.fontSize != fontSize)
         if let pendingInlineReplacement {
-            if pendingInlineReplacement.nodeId == nodeId,
+            if pendingInlineReplacement.documentId == documentId,
                context.coordinator.lastAppliedInlineReplacementID != pendingInlineReplacement.id {
                 context.coordinator.applyInlineReplacement(pendingInlineReplacement, to: textView)
             }
@@ -222,7 +254,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             (textView as? NativeTextView)?.allowFrameShrink = true
         }
         if isNodeSwitch {
-            context.coordinator.nodeId = nodeId
+            context.coordinator.documentId = documentId
             textView.undoManager?.removeAllActions()
             context.coordinator.didInitialFormatting = false
             context.coordinator.resetImageEmbedState()
@@ -248,7 +280,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
 
         let displayState = WikiLinkService.makeDisplayState(from: text)
         let displayText = displayState.display
-        context.coordinator.nodeLinkMetadata = displayState.metadata
+        context.coordinator.wikiLinkMetadata = displayState.metadata
         // Suppress frame shrink during text replacement when images are present (but NOT on node switch).
         if !isNodeSwitch {
             context.coordinator.suppressFrameShrink = true
@@ -347,11 +379,11 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             text: $text,
             fontName: fontName,
             fontSize: fontSize,
-            isNodeActive: $isNodeActive,
+            isWikiLinkActive: $isWikiLinkActive,
             onLinkClick: onLinkClick,
             onInlineSelectionChange: onInlineSelectionChange
         )
-        coordinator.nodeId = nodeId
+        coordinator.documentId = documentId
         coordinator.configuration = configuration
         coordinator.onCodeBlockSelectionChange = onCodeBlockSelectionChange
         return coordinator

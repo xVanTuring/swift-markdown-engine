@@ -62,10 +62,10 @@ extension NativeTextViewCoordinator {
         if !wtActive {
             let storageState = WikiLinkService.makeStorageState(
                 from: tv.string,
-                existingMetadata: self.nodeLinkMetadata,
+                existingMetadata: self.wikiLinkMetadata,
                 textStorage: tv.textStorage
             )
-            self.nodeLinkMetadata = storageState.metadata
+            self.wikiLinkMetadata = storageState.metadata
             if storageState.storage != self.lastSyncedText {
                 DispatchQueue.main.async {
                     self.lastSyncedText = storageState.storage
@@ -178,7 +178,7 @@ extension NativeTextViewCoordinator {
            selRange.location < (tv.string as NSString).length,
            tv.textStorage?.attribute(.link, at: selRange.location, effectiveRange: nil) != nil {
             isImageEmbedActive = false
-            isNodeActive = false
+            isWikiLinkActive = false
             onInlineSelectionChange?(nil)
             return
         }
@@ -279,17 +279,17 @@ extension NativeTextViewCoordinator {
             let openingMarkerLength = inlineContext.selectionKind == .imageEmbed ? 3 : 2
             let displayRange = selectionDisplayRange(for: inlineContext.token, openingMarkerLength: openingMarkerLength)
             let placeholder = nsString.substring(with: displayRange)
-            let storageRange = inlineContext.selectionKind == .nodeLink
+            let storageRange = inlineContext.selectionKind == .wikiLink
                 ? storageRange(containingDisplayLocation: selLocation) ?? storageRange(forDisplayRange: displayRange)
                 : nil
             let previewRect = tv.viewRect(forCharacterRange: displayRange, using: layoutBridge)
                 ?? tv.viewRect(forCharacterRange: tv.selectedRange(), using: layoutBridge)
 
             let shouldShowInlinePreview =
-                inlineContext.selectionKind == .nodeLink
+                inlineContext.selectionKind == .wikiLink
                 || (inlineContext.selectionKind == .imageEmbed && imageEmbedShowsInlinePreview)
             if shouldShowInlinePreview, let previewRect {
-                let selection = NodeLinkSelection(
+                let selection = WikiLinkSelection(
                     displayRange: displayRange,
                     storageRange: storageRange,
                     placeholder: placeholder
@@ -302,7 +302,7 @@ extension NativeTextViewCoordinator {
         }
 
         DispatchQueue.main.async {
-            self.isNodeActive = inlineSelectionState?.kind == .nodeLink
+            self.isWikiLinkActive = inlineSelectionState?.kind == .wikiLink
             self.isImageEmbedActive = isInsideImageEmbed
             self.onInlineSelectionChange?(inlineSelectionState)
         }
@@ -369,7 +369,7 @@ extension NativeTextViewCoordinator {
             return false
         }
         // Direkt deaktivieren, bevor der Navigation-Callback läuft.
-        self.isNodeActive = false
+        self.isWikiLinkActive = false
         DispatchQueue.main.async {
             self.onLinkClick?(target)
         }

@@ -16,7 +16,7 @@ extension NativeTextViewCoordinator {
     public func textViewWritingToolsWillBegin(_ textView: NSTextView) {
         let sel = textView.selectedRange()
         isWritingToolsActive = true
-        wtStartNodeId = nodeId
+        wtStartDocumentId = documentId
         wtChildWindow = nil
         wtInitialChildOrigin = nil
         wtInitialSelectionRange = sel.length > 0 ? sel : nil
@@ -33,21 +33,21 @@ extension NativeTextViewCoordinator {
 
         // If the user switched files while WT was active, updateNSView already
         // reset the WT state and loaded the new node — discard these results.
-        if wtStartNodeId != nil && wtStartNodeId != nodeId {
-            wtStartNodeId = nil
+        if wtStartDocumentId != nil && wtStartDocumentId != documentId {
+            wtStartDocumentId = nil
             return
         }
-        wtStartNodeId = nil
+        wtStartDocumentId = nil
 
         // Still on the same node — sync the rewritten text to the binding.
         // Defer to next runloop to avoid modifying @Binding during a view update
         // (textViewWritingToolsDidEnd can fire synchronously from updateNSView).
         let storageState = WikiLinkService.makeStorageState(
             from: textView.string,
-            existingMetadata: nodeLinkMetadata,
+            existingMetadata: wikiLinkMetadata,
             textStorage: textView.textStorage
         )
-        nodeLinkMetadata = storageState.metadata
+        wikiLinkMetadata = storageState.metadata
         let storage = storageState.storage
         DispatchQueue.main.async { [self] in
             lastSyncedText = storage

@@ -1,6 +1,6 @@
 //
 //  MarkdownTokenizer.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Luca Chen on 18.02.26.
 //
@@ -23,7 +23,7 @@ private extension MarkdownTokenizer {
     static let imageEmbedRegex = try! NSRegularExpression(
         pattern: "!\\[\\[([^\\]\\r\\n]*)\\]\\]"
     )
-    static let nodeLinkRegex = try! NSRegularExpression(
+    static let wikiLinkRegex = try! NSRegularExpression(
         pattern: "\\[\\[([^\\|\\]\\r\\n]*)\\|?([^\\]\\r\\n]*)\\]\\]"
     )
     static let markdownLinkRegex = try! NSRegularExpression(
@@ -99,7 +99,7 @@ enum MarkdownTokenizer {
                                         markerRanges: [startMarker, endMarker]))
         }
 
-        // Image embeds ![[Name]] (must be parsed before nodeLinks)
+        // Image embeds ![[Name]] (must be parsed before wikiLinks)
         var imageEmbedRanges: [NSRange] = []
         for match in imageEmbedRegex.matches(in: text, options: [], range: fullRange) {
             let full = match.range(at: 0)
@@ -114,7 +114,7 @@ enum MarkdownTokenizer {
         }
 
         // Node links [[Name]]
-        for match in nodeLinkRegex.matches(in: text, options: [], range: fullRange) {
+        for match in wikiLinkRegex.matches(in: text, options: [], range: fullRange) {
             let full = match.range(at: 0)
             // Skip ranges already claimed by imageEmbed tokens
             let overlapsImage = imageEmbedRanges.contains { NSIntersectionRange($0, full).length > 0 }
@@ -122,7 +122,7 @@ enum MarkdownTokenizer {
             let content = match.range(at: 1)
             let open = NSRange(location: full.location, length: 2)
             let close = NSRange(location: full.location + full.length - 2, length: 2)
-            tokens.append(MarkdownToken(kind: .nodeLink,
+            tokens.append(MarkdownToken(kind: .wikiLink,
                                         range: full,
                                         contentRange: content,
                                         markerRanges: [open, close]))

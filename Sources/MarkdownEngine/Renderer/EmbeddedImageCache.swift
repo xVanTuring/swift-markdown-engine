@@ -1,6 +1,6 @@
 //
 //  EmbeddedImageCache.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Claude on 16.03.26.
 //

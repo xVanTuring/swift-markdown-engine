@@ -1,6 +1,6 @@
 //
 //  MarkdownStyler.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Luca Chen on 18.02.26.
 //
@@ -82,7 +82,7 @@ enum MarkdownStyler {
         layoutBridge: LayoutBridge? = nil,
         caretLocation: Int,
         activeTokenIndices: Set<Int>,
-        nodeLinkIDProvider: (NSRange) -> String? = { _ in nil },
+        wikiLinkIDProvider: (NSRange) -> String? = { _ in nil },
         precomputedTokens: [MarkdownToken]? = nil,
         scopedRanges: [NSRange]? = nil,
         configuration: MarkdownEditorConfiguration = .default
@@ -160,7 +160,7 @@ enum MarkdownStyler {
         result += styleHeadings(ctx)
         result += styleEmphasis(ctx)
         result += styleAutoLinks(ctx)
-        result += styleNodeLinks(ctx, nodeLinkIDProvider: nodeLinkIDProvider)
+        result += styleWikiLinks(ctx, wikiLinkIDProvider: wikiLinkIDProvider)
         result += styleImageEmbeds(ctx)
         result += styleMarkdownLinks(ctx)
         result += styleCodeBlocks(ctx)

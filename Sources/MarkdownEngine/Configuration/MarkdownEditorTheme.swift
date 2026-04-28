@@ -1,6 +1,6 @@
 //
 //  MarkdownEditorTheme.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Color palette for the Markdown editor engine.
 //

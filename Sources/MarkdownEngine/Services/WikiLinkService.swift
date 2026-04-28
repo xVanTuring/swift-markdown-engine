@@ -1,6 +1,6 @@
 //
 //  WikiLinkService.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Generic wiki-link transformer used by the editor engine.
 //
@@ -53,6 +53,9 @@ public enum WikiLinkService {
     private static let displayLinkRegex = try! NSRegularExpression(pattern: displayPattern)
     private static let logger = Logger(subsystem: "com.markdownengine.wikilinks", category: "WikiLink")
 
+    /// Convert storage form `[[Name|<id>]]` into display form `[[Name]]`,
+    /// returning both the rewritten string and a metadata map keyed by the
+    /// display range so callers can recover the original storage range and id.
     public static func makeDisplayState(from storageText: String) -> (display: String, metadata: [RangeKey: LinkMetadata]) {
         let nsStorage = storageText as NSString
         let fullRange = NSRange(location: 0, length: nsStorage.length)
@@ -98,6 +101,9 @@ public enum WikiLinkService {
         return (result, metadata)
     }
 
+    /// Convert display form `[[Name]]` back into storage form `[[Name|<id>]]`,
+    /// preferring an id read from the live text storage's `.wikiLinkID`
+    /// attribute and falling back to `existingMetadata`.
     public static func makeStorageState(
         from displayText: String,
         existingMetadata: [RangeKey: LinkMetadata],
@@ -127,7 +133,7 @@ public enum WikiLinkService {
 
             var linkID: String? = nil
             if contentRange.length > 0 {
-                if let idAttr = textStorage?.attribute(.nodeLinkID, at: contentRange.location, effectiveRange: nil) as? String {
+                if let idAttr = textStorage?.attribute(.wikiLinkID, at: contentRange.location, effectiveRange: nil) as? String {
                     linkID = idAttr
                 }
             }
@@ -158,8 +164,11 @@ public enum WikiLinkService {
         return (storage, metadata)
     }
 
+    /// Resolve a clicked link's opaque id by reading the `.wikiLinkID`
+    /// attribute under the caret, falling back to the link's display string
+    /// if the attribute is missing.
     public static func resolveIdentifier(link: Any, textView: NSTextView, at charIndex: Int) -> String? {
-        if let idAttr = textView.textStorage?.attribute(.nodeLinkID, at: charIndex, effectiveRange: nil) as? String {
+        if let idAttr = textView.textStorage?.attribute(.wikiLinkID, at: charIndex, effectiveRange: nil) as? String {
             return idAttr
         }
         if let name = link as? String {
@@ -168,11 +177,16 @@ public enum WikiLinkService {
         return nil
     }
 
+    /// Split a single storage fragment `[[Name|<id>]]` into its display
+    /// form (`[[Name]]`) and the opaque identifier.
     public static func displayFragmentAndID(from storageFragment: String) -> (display: String, id: String?) {
         let displayState = makeDisplayState(from: storageFragment)
         return (displayState.display, displayState.metadata.values.first?.id)
     }
 
+    /// Compute the zero-length caret range that should follow a replacement
+    /// of `displayRange` with `storageFragment` (after the storage→display
+    /// rewrite that the engine performs internally).
     public static func caretRangeAfterReplacing(
         displayRange: NSRange,
         with storageFragment: String

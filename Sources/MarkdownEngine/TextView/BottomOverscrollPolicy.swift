@@ -1,6 +1,6 @@
 //
 //  BottomOverscrollPolicy.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Computes the comfortable bottom-of-document slack so the caret never
 //  hugs the bottom edge of the visible viewport while typing.

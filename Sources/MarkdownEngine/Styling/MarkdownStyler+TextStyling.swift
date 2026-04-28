@@ -1,6 +1,6 @@
 //
 //  MarkdownStyler+TextStyling.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Heading and emphasis (bold / italic / bold+italic) attribute generation.
 //

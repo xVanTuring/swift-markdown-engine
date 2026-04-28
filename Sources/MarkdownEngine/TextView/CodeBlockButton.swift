@@ -1,6 +1,6 @@
 //
 //  CodeBlockButton.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Luca Chen on 15.12.25
 //  Purpose: Shows a small copy button overlay for each code block.
@@ -8,10 +8,21 @@
 
 import SwiftUI
 
+/// Position and content of a single fenced code block currently visible in
+/// the editor.
+///
+/// Delivered to embedders through
+/// ``NativeTextViewWrapper/onCodeBlockSelectionChange`` so they can overlay
+/// a copy button (see ``CodeBlockButton``) at the right place.
 public struct CodeBlockSelection: Identifiable, Sendable {
-    public let id: Int // Token index
+    /// Index of the source token, stable for as long as the block exists.
+    public let id: Int
+    /// Frame of the rendered code block in the text view's coordinate space.
     public let rect: CGRect
+    /// Language tag declared after the opening fence (`` ```swift ``).
     public let language: String?
+    /// Plain text content of the block, suitable for putting on the
+    /// pasteboard.
     public let code: String
 
     public init(id: Int, rect: CGRect, language: String?, code: String) {
@@ -22,8 +33,16 @@ public struct CodeBlockSelection: Identifiable, Sendable {
     }
 }
 
+/// Drop-in SwiftUI overlay that renders a small copy-to-pasteboard button
+/// in the top-right corner of a fenced code block.
+///
+/// Embedders typically place one of these per ``CodeBlockSelection`` they
+/// receive from the editor. The view positions itself absolutely using
+/// ``CodeBlockSelection/rect``.
 public struct CodeBlockButton: View {
+    /// The code block this button is attached to.
     public let selection: CodeBlockSelection
+    /// Closure invoked when the user clicks the button.
     public let onCopy: () -> Void
 
     public init(selection: CodeBlockSelection, onCopy: @escaping () -> Void) {

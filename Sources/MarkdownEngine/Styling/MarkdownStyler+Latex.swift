@@ -1,6 +1,6 @@
 //
 //  MarkdownStyler+Latex.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Block ($$...$$) and inline ($...$) LaTeX formula rendering.
 //

@@ -31,8 +31,8 @@ extension NativeTextViewCoordinator {
             paragraphStyle: paragraphStyle,
             caretLocation: textView.selectedRange().location,
             activeTokenIndices: activeTokenIndices,
-            nodeLinkIDProvider: { [weak self] range in
-                self?.nodeLinkID(for: range)
+            wikiLinkIDProvider: { [weak self] range in
+                self?.wikiLinkID(for: range)
             },
             precomputedTokens: tokens,
             configuration: configuration
@@ -48,13 +48,13 @@ extension NativeTextViewCoordinator {
         var codeTokens: [MarkdownToken] = []
         var latexTokens: [MarkdownToken] = []
         var blockLatexTokens: [MarkdownToken] = []
-        var nodeLinkTokens: [MarkdownToken] = []
+        var wikiLinkTokens: [MarkdownToken] = []
         var imageEmbedTokens: [MarkdownToken] = []
 
         codeTokens.reserveCapacity(tokens.count / 2)
         latexTokens.reserveCapacity(tokens.count / 4)
         blockLatexTokens.reserveCapacity(tokens.count / 4)
-        nodeLinkTokens.reserveCapacity(tokens.count / 4)
+        wikiLinkTokens.reserveCapacity(tokens.count / 4)
 
         for token in tokens {
             switch token.kind {
@@ -64,8 +64,8 @@ extension NativeTextViewCoordinator {
                 latexTokens.append(token)
             case .blockLatex:
                 blockLatexTokens.append(token)
-            case .nodeLink:
-                nodeLinkTokens.append(token)
+            case .wikiLink:
+                wikiLinkTokens.append(token)
             case .imageEmbed:
                 imageEmbedTokens.append(token)
             default:
@@ -78,7 +78,7 @@ extension NativeTextViewCoordinator {
             codeTokens: codeTokens,
             latexTokens: latexTokens,
             blockLatexTokens: blockLatexTokens,
-            nodeLinkTokens: nodeLinkTokens,
+            wikiLinkTokens: wikiLinkTokens,
             imageEmbedTokens: imageEmbedTokens
         )
         cachedParsedText = text
@@ -186,7 +186,7 @@ extension NativeTextViewCoordinator {
             let contentLength = max(0, (replacementDisplay as NSString).length - 4)
             if contentLength > 0 {
                 let contentRange = NSRange(location: range.location + 2, length: contentLength)
-                textView.textStorage?.addAttribute(.nodeLinkID, value: linkID, range: contentRange)
+                textView.textStorage?.addAttribute(.wikiLinkID, value: linkID, range: contentRange)
             }
         }
 

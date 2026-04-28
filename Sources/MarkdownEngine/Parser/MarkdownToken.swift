@@ -1,6 +1,6 @@
 //
 //  MarkdownToken.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Created by Luca Chen on 18.02.26.
 //
@@ -11,7 +11,7 @@ import AppKit
 import Foundation
 
 extension NSAttributedString.Key {
-    public static let nodeLinkID = NSAttributedString.Key("NodeLinkID")
+    public static let wikiLinkID = NSAttributedString.Key("NodeLinkID")
     public static let taskCheckbox = NSAttributedString.Key("TaskCheckbox")
 }
 
@@ -20,7 +20,7 @@ enum MarkdownTokenKind {
     case boldItalic
     case bold
     case link
-    case nodeLink
+    case wikiLink
     case heading
     case codeBlock
     case inlineCode

@@ -1,6 +1,6 @@
 //
 //  MarkdownStyler+Code.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Fenced code blocks and inline code spans.
 //

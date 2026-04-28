@@ -1,6 +1,6 @@
 //
 //  MarkdownEditorConfiguration.swift
-//  Nodes
+//  MarkdownEngine
 //
 //  Centralized configuration for the Markdown editor engine.
 //
@@ -136,6 +136,7 @@ public struct CodeBlockStyle: Sendable {
 
 // MARK: - Inline code
 
+/// Styling for inline `` `code` `` spans.
 public struct InlineCodeStyle: Sendable {
     /// Inline-code reuses the code block font size scale by default.
     public var fontSizeScale: CGFloat
@@ -149,6 +150,7 @@ public struct InlineCodeStyle: Sendable {
 
 // MARK: - Lists
 
+/// Behavior toggles and metrics for ordered / unordered list editing.
 public struct ListStyle: Sendable {
     /// Master switch for list-related editing helpers (auto-continue,
     /// auto-indent, marker conversion). When `false`, lists are still
@@ -213,6 +215,7 @@ public struct HeadingStyle: Sendable {
 
 // MARK: - Image embeds (![[...]])
 
+/// Sizing and spacing rules for `![[Name]]` image embeds.
 public struct ImageEmbedStyle: Sendable {
     /// Minimum allowed display width (points) for an embedded image.
     public var minimumWidth: CGFloat
@@ -244,6 +247,7 @@ public struct ImageEmbedStyle: Sendable {
 
 // MARK: - LaTeX
 
+/// Vertical spacing for block-LaTeX `$$...$$` paragraphs.
 public struct BlockLatexStyle: Sendable {
     /// Top spacing for $$...$$ block paragraphs.
     public var paragraphSpacingBefore: CGFloat
@@ -265,6 +269,8 @@ public struct BlockLatexStyle: Sendable {
     public static let `default` = BlockLatexStyle()
 }
 
+/// Reserved for future inline-LaTeX (`$...$`) tuning. Currently has no
+/// effect; inline LaTeX inherits font size from the surrounding context.
 public struct InlineLatexStyle: Sendable {
     /// Reserved for future inline-LaTeX tuning — currently the engine inherits
     /// font size from the surrounding heading context.
@@ -277,6 +283,7 @@ public struct InlineLatexStyle: Sendable {
 
 // MARK: - Task checkboxes
 
+/// Glyph sizing and spacing for `- [ ]` / `- [x]` task checkboxes.
 public struct CheckboxStyle: Sendable {
     /// Minimum extra spacing (points) inserted after an unchecked checkbox to
     /// optically center the rendered glyph.
@@ -309,6 +316,7 @@ public struct CheckboxStyle: Sendable {
 
 // MARK: - Links
 
+/// Foreground alpha values applied to link content in different states.
 public struct LinkStyle: Sendable {
     /// Foreground alpha for the visible label of an active markdown link.
     public var activeLinkAlpha: CGFloat
@@ -326,6 +334,7 @@ public struct LinkStyle: Sendable {
 
 // MARK: - Paragraphs
 
+/// Default paragraph spacing and line height applied to body text.
 public struct ParagraphStyle: Sendable {
     /// Extra paragraph spacing as a fraction of the document's default line height.
     public var spacingFactor: CGFloat
@@ -376,6 +385,8 @@ public struct OverscrollPolicy: Sendable {
 
 // MARK: - Drag selection
 
+/// Tuning for the auto-scroll boost that engages while the user drags a
+/// selection past the visible viewport edges.
 public struct DragSelectionPolicy: Sendable {
     /// Movement threshold (points) before the auto-scroll boost engages.
     public var movementThreshold: CGFloat
