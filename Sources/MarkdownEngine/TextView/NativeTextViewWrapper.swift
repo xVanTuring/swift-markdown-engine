@@ -228,10 +228,25 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         // (e.g. when the available wiki-link targets change). Cheap pointer-/
         // value-based comparison; full equality isn't required because the
         // embedder is the source of truth.
-        if context.coordinator.configuration.services.images.fingerprint()
-            != configuration.services.images.fingerprint() {
+        let newImageFingerprint = configuration.services.images.fingerprint()
+        if newImageFingerprint != context.coordinator.lastImageFingerprint {
+            context.coordinator.lastImageFingerprint = newImageFingerprint
             context.coordinator.configuration.services = configuration.services
             (nsView.documentView as? NativeTextView)?.configuration.services = configuration.services
+            // Force the rest of updateNSView to re-run styling — without this
+            // the early-return below short-circuits when text/font are
+            // unchanged, and a freshly fetched async image (the typical
+            // fingerprint trigger) would never get drawn.
+            context.coordinator.didInitialFormatting = false
+            // TextKit 2 caches layout fragments and only auto-invalidates on
+            // text changes. Custom image attributes (`.latexImage`,
+            // `.latexIsBlock`, …) won't trip the layout pass on their own,
+            // so the cached `renderingSurfaceBounds` would still reflect a
+            // pre-image height. Force a layout invalidation to pick up the
+            // new image rects when re-styling re-attaches them.
+            if let tlm = textView.textLayoutManager {
+                tlm.invalidateLayout(for: tlm.documentRange)
+            }
         }
         textView.isEditable = isEditable
         textView.isSelectable = isEditable
@@ -377,6 +392,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         )
         coordinator.documentId = documentId
         coordinator.configuration = configuration
+        coordinator.lastImageFingerprint = configuration.services.images.fingerprint()
         coordinator.onCodeBlockSelectionChange = onCodeBlockSelectionChange
         return coordinator
     }
