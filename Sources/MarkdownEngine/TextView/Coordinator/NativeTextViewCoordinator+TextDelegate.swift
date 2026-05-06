@@ -213,9 +213,21 @@ extension NativeTextViewCoordinator {
 
         let shouldSkipSelectionRestyle = pendingEditedRange != nil
         let tokensChanged = activeTokenIndices != prevActive
+        // Caret crossings in/out of `- [ ]` syntax need a restyle too: task
+        // checkboxes aren't tracked as tokens, so `tokensChanged` won't
+        // notice them, but the styler suppresses the checkbox glyph while
+        // the caret sits inside the syntax. Without this signal a
+        // cursor-out (after editing the brackets) leaves the line stuck on
+        // raw chars.
+        let prevTaskSyntax = previousCaretLocation.flatMap {
+            MarkdownStyler.taskSyntaxRange(at: $0, in: tv.string)
+        }
+        let currentTaskSyntax = MarkdownStyler.taskSyntaxRange(at: selLoc, in: tv.string)
+        let taskSyntaxChanged = prevTaskSyntax?.location != currentTaskSyntax?.location
+            || prevTaskSyntax?.length != currentTaskSyntax?.length
         if shouldSkipSelectionRestyle {
             // textDidChange performs the pending restyle for this edit cycle.
-        } else if tokensChanged {
+        } else if tokensChanged || taskSyntaxChanged {
             restyleTextView(tv, paragraphCandidates: paragraphCandidates, tokens: tokens)
         }
 
