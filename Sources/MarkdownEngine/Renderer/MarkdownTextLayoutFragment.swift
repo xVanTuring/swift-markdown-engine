@@ -193,16 +193,29 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         point: CGPoint
     ) -> CGRect? {
         guard let pos = drawPosition(forDocumentCharAt: attrRange.location, point: point) else { return nil }
-        let localIndex = attrRange.location - (fragmentNSRange?.location ?? 0)
-        let lb = lineBounds(forLocalIndex: localIndex, point: point)
-        let lineHeight = lb?.height ?? pos.lineHeight
-        let lineMinY = lb?.origin.y ?? (pos.baselineY - lineHeight)
+        let fragLocation = fragmentNSRange?.location ?? 0
+        let localStart = attrRange.location - fragLocation
+        let localLast = max(localStart, localStart + attrRange.length - 1)
+        let firstLb = lineBounds(forLocalIndex: localStart, point: point)
+        // For a wrapped source span (e.g. a long `![alt](url)` that wraps in
+        // a narrow window), anchor to the LAST line's maxY so the image
+        // doesn't paint over subsequent wrapped lines of its own source.
+        let lastLb = lineBounds(forLocalIndex: localLast, point: point) ?? firstLb
+        let lineHeight = firstLb?.height ?? pos.lineHeight
+        let firstLineMinY = firstLb?.origin.y ?? (pos.baselineY - lineHeight)
+        let lastLineMaxY = (lastLb?.origin.y ?? firstLineMinY) + (lastLb?.height ?? lineHeight)
 
         let yPosition: CGFloat
         if let blockOffsetY {
-            yPosition = lineMinY + blockOffsetY
+            // Backward-compatible interpretation: `blockOffsetY` is the gap
+            // from the FIRST line's top to the image's top (= baseLineHeight
+            // + imageGap on a single-line source). Re-anchor to the last
+            // line by subtracting one line height, leaving the same single-
+            // line geometry intact while pushing the image down by one
+            // extra line per wrap.
+            yPosition = lastLineMaxY + blockOffsetY - lineHeight
         } else {
-            yPosition = lineMinY + (lineHeight - imageBounds.height) / 2
+            yPosition = firstLineMinY + (lineHeight - imageBounds.height) / 2
         }
         return CGRect(x: pos.x, y: yPosition,
                        width: imageBounds.width, height: imageBounds.height)
