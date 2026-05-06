@@ -21,6 +21,12 @@ extension NSAttributedString.Key {
 
 final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
+    // MARK: - FB15131180
+
+    /// Maps to TextKit-2's private `extraLineFragmentAttributes` selector so we can pin the trailing extra-line metrics to body font; otherwise a trailing heading paragraph inflates `usageBoundsForTextContainer` by ~30pt when the caret enters it. Pattern from STTextView.
+    @objc(extraLineFragmentAttributes)
+    dynamic var stExtraLineFragmentAttributes: NSDictionary?
+
     // MARK: - Rendering surface
 
     /// Extend rendering bounds for code-block backgrounds (full container width)
@@ -369,6 +375,21 @@ final class MarkdownLayoutManagerDelegate: NSObject, NSTextLayoutManagerDelegate
         textLayoutFragmentFor location: any NSTextLocation,
         in textElement: NSTextElement
     ) -> NSTextLayoutFragment {
-        MarkdownTextLayoutFragment(textElement: textElement, range: textElement.elementRange)
+        let fragment = MarkdownTextLayoutFragment(textElement: textElement, range: textElement.elementRange)
+        // Seed body font + paragraphStyle so the trailing fragment doesn't inherit heading metrics (FB15131180).
+        if let textView = textLayoutManager.textContainer?.textView as? NativeTextView {
+            let baseFont = textView.baseFont
+            let para = NSMutableParagraphStyle()
+            let lineHeight = layoutBridgeDefaultLineHeight(for: baseFont, using: textView.layoutBridge)
+            para.minimumLineHeight = ceil(lineHeight) + textView.configuration.paragraph.lineHeightExtraSpacing
+            para.paragraphSpacing = ceil(lineHeight * textView.configuration.paragraph.spacingFactor)
+            para.paragraphSpacingBefore = 0
+            fragment.stExtraLineFragmentAttributes = NSDictionary(dictionary: [
+                NSAttributedString.Key.font: baseFont,
+                NSAttributedString.Key.foregroundColor: textView.configuration.theme.bodyText,
+                NSAttributedString.Key.paragraphStyle: para
+            ])
+        }
+        return fragment
     }
 }
