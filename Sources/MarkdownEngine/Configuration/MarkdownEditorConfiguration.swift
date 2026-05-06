@@ -39,8 +39,9 @@ public struct MarkdownEditorConfiguration: Sendable {
     public var paragraph: ParagraphStyle
     public var overscroll: OverscrollPolicy
     public var dragSelection: DragSelectionPolicy
-    public var contentInsets: ContentInsets
+    public var safeAreaInsets: SafeAreaInsets
     public var scrollers: ScrollersPolicy
+    public var textInsets: TextInsets
 
     public init(
         theme: MarkdownEditorTheme = .default,
@@ -58,8 +59,9 @@ public struct MarkdownEditorConfiguration: Sendable {
         paragraph: ParagraphStyle = .default,
         overscroll: OverscrollPolicy = .default,
         dragSelection: DragSelectionPolicy = .default,
-        contentInsets: ContentInsets = .default,
-        scrollers: ScrollersPolicy = .default
+        safeAreaInsets: SafeAreaInsets = .default,
+        scrollers: ScrollersPolicy = .default,
+        textInsets: TextInsets = .default
     ) {
         self.theme = theme
         self.services = services
@@ -76,8 +78,9 @@ public struct MarkdownEditorConfiguration: Sendable {
         self.paragraph = paragraph
         self.overscroll = overscroll
         self.dragSelection = dragSelection
-        self.contentInsets = contentInsets
+        self.safeAreaInsets = safeAreaInsets
         self.scrollers = scrollers
+        self.textInsets = textInsets
     }
 
     public static let `default` = MarkdownEditorConfiguration()
@@ -85,7 +88,7 @@ public struct MarkdownEditorConfiguration: Sendable {
 
 // MARK: - Scroll bars
 
-/// Visibility and auto-hide behavior for the editor's vertical/horizontal scrollers. Defaults follow the typical text-editor expectation (vertical scroller visible with system auto-hide); use ``hidden`` for embedders that wire their own scroll overlay.
+/// Scroll bar visibility. Default: vertical only, autohide on.
 public struct ScrollersPolicy: Sendable {
     public var hasVerticalScroller: Bool
     public var hasHorizontalScroller: Bool
@@ -102,14 +105,29 @@ public struct ScrollersPolicy: Sendable {
     }
 
     public static let `default` = ScrollersPolicy()
-    /// No scrollers at all. Use when the embedder draws its own scroll overlay.
+    /// No scrollers (use with a custom scroll overlay).
     public static let hidden = ScrollersPolicy(hasVerticalScroller: false, hasHorizontalScroller: false)
-    /// Vertical scroller only (typical Markdown / prose editor). Same as `default`.
+    /// Vertical only — same as `.default`.
     public static let vertical = ScrollersPolicy(hasVerticalScroller: true, hasHorizontalScroller: false)
-    /// Both scrollers visible (useful for code-heavy or wide-content editors).
+    /// Both axes (code-heavy / wide content).
     public static let both = ScrollersPolicy(hasVerticalScroller: true, hasHorizontalScroller: true)
-    /// Vertical scroller permanently visible (no auto-hide).
+    /// Vertical, no auto-hide.
     public static let alwaysVisible = ScrollersPolicy(hasVerticalScroller: true, autohidesScrollers: false)
+}
+
+// MARK: - Text insets
+
+/// Margins inside the text view (`NSTextView.textContainerInset`). Scroll bar stays at the outer edge.
+public struct TextInsets: Sendable {
+    public var horizontal: CGFloat
+    public var vertical: CGFloat
+
+    public init(horizontal: CGFloat = 0, vertical: CGFloat = 5) {
+        self.horizontal = horizontal
+        self.vertical = vertical
+    }
+
+    public static let `default` = TextInsets()
 }
 
 // MARK: - Marker visibility
@@ -447,25 +465,13 @@ public struct DragSelectionPolicy: Sendable {
     public static let `default` = DragSelectionPolicy()
 }
 
-// MARK: - Content insets
+// MARK: - Safe-area insets
 
-/// Inset (in points) applied to the editor's enclosing scroll view's content
-/// area on each edge.
-///
-/// Use this when the editor is hosted inside a layout that needs reserved
-/// space at one of the edges — for example, a translucent toolbar or header
-/// bar that the document should scroll *underneath*. The default is zero on
-/// every edge so the editor fills its container exactly; embedders that
-/// want padding opt in explicitly.
-public struct ContentInsets: Sendable {
-    /// Top inset in points. Common use: reserving space for a translucent
-    /// title / toolbar bar.
+/// Reserves space on the scroll view for system overlays (e.g. a translucent toolbar to scroll underneath). Maps to `NSScrollView.contentInsets`; scroll bar follows the inset.
+public struct SafeAreaInsets: Sendable {
     public var top: CGFloat
-    /// Leading (left in NSEdgeInsets) inset in points.
     public var leading: CGFloat
-    /// Trailing (right in NSEdgeInsets) inset in points.
     public var trailing: CGFloat
-    /// Bottom inset in points.
     public var bottom: CGFloat
 
     public init(
@@ -480,5 +486,5 @@ public struct ContentInsets: Sendable {
         self.bottom = bottom
     }
 
-    public static let `default` = ContentInsets()
+    public static let `default` = SafeAreaInsets()
 }
