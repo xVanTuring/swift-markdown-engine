@@ -85,7 +85,9 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         let localIndex = docIndex - fragRange.location
         guard localIndex >= 0 else { return nil }
 
-        var lineY: CGFloat = 0
+        // NSTextLineFragment.typographicBounds.origin.y is already relative to the
+        // parent layout fragment, so we use it directly — accumulating per-line
+        // heights would double-count the inter-line offset on wrapped lines.
         for lineFragment in textLineFragments {
             let lr = lineFragment.characterRange
             if localIndex >= lr.location && localIndex < lr.location + lr.length {
@@ -93,11 +95,10 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
                 let tb = lineFragment.typographicBounds
                 return (
                     x: point.x + tb.origin.x + charPos.x,
-                    baselineY: point.y + lineY + tb.origin.y + charPos.y,
+                    baselineY: point.y + tb.origin.y + charPos.y,
                     lineHeight: tb.height
                 )
             }
-            lineY += lineFragment.typographicBounds.height
         }
         return nil
     }
@@ -105,17 +106,15 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
     /// Typographic bounds of the line fragment containing `localIndex`
     /// (index relative to the fragment, not the document).
     private func lineBounds(forLocalIndex localIndex: Int, point: CGPoint) -> CGRect? {
-        var lineY: CGFloat = 0
         for lineFragment in textLineFragments {
             let lr = lineFragment.characterRange
             if localIndex >= lr.location && localIndex < lr.location + lr.length {
                 let tb = lineFragment.typographicBounds
                 return CGRect(x: point.x + lineFragment.glyphOrigin.x + tb.origin.x,
-                              y: point.y + lineY + tb.origin.y,
+                              y: point.y + tb.origin.y,
                               width: tb.width,
                               height: tb.height)
             }
-            lineY += lineFragment.typographicBounds.height
         }
         return nil
     }
