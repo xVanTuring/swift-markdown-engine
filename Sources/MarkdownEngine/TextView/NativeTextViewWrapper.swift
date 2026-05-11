@@ -44,7 +44,9 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     /// off this value via ``MarkdownEditorConfiguration``.
     public var fontSize: CGFloat
     /// Opaque document identifier. Changing this invalidates undo history
-    /// and resets per-document editor state.
+    /// and resets per-document editor state. Set a stable, unique value
+    /// per document when displaying multiple editors so pending
+    /// replacements and undo stay scoped to each editor.
     public var documentId: String
     /// When `false` the editor renders read-only with no caret.
     public var isEditable: Bool
@@ -69,12 +71,12 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
 
     public init(
         text: Binding<String>,
-        isWikiLinkActive: Binding<Bool>,
-        pendingInlineReplacement: Binding<InlineReplacementRequest?>,
-        configuration: MarkdownEditorConfiguration,
-        fontName: String,
+        isWikiLinkActive: Binding<Bool> = .constant(false),
+        pendingInlineReplacement: Binding<InlineReplacementRequest?> = .constant(nil),
+        configuration: MarkdownEditorConfiguration = .default,
+        fontName: String = "SF Pro",
         fontSize: CGFloat = 16,
-        documentId: String,
+        documentId: String = "default",
         isEditable: Bool = true,
         onPasteImage: ((NSPasteboard) -> String?)? = nil,
         onLinkClick: ((String) -> Void)? = nil,
@@ -185,10 +187,13 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         textView.recalcOverscroll(for: scrollView)
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: scrollView.contentView, queue: nil) { _ in
-            // Only react when the viewport itself resizes (window resize).
-            // Without this guard, TextKit-induced textView frame changes echo
-            // back here and re-trigger recalcOverscroll, causing a 149pt
-            // height oscillation after clicks.
+            // Code block button overlays depend on layout-relative rects; refresh
+            // them on every frame change so window resizes don't leave stale rects.
+            context.coordinator.updateCodeBlockSelection(textView: textView)
+            // Only react with overscroll recalc when the viewport itself resizes
+            // (window resize). Without this guard, TextKit-induced textView frame
+            // changes echo back here and re-trigger recalcOverscroll, causing a
+            // 149pt height oscillation after clicks.
             guard abs(textView.frame.height - scrollView.contentView.bounds.height) > 1 else { return }
             textView.recalcOverscroll(for: scrollView)
             scrollView.clampToInsets()

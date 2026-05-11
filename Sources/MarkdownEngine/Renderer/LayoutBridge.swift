@@ -39,6 +39,17 @@ final class LayoutBridge {
 
     func boundingRect(forCharacterRange range: NSRange, in textContainer: NSTextContainer) -> CGRect {
         guard let textRange = textRange(for: range) else { return .zero }
+        // Ensure TextKit 2 has laid out everything *before* the queried
+        // range, not just the range itself. The Y position of `range`
+        // depends on the cumulative height of all preceding fragments;
+        // if any of them are still at preliminary metrics (e.g. before
+        // syntax-highlight font has been applied), the Y is wrong.
+        if let docStart = textLayoutManager.textContentManager?.documentRange.location,
+           let prefixRange = NSTextRange(location: docStart, end: textRange.endLocation) {
+            textLayoutManager.ensureLayout(for: prefixRange)
+        } else {
+            textLayoutManager.ensureLayout(for: textRange)
+        }
         var result = CGRect.null
         textLayoutManager.enumerateTextSegments(
             in: textRange, type: .standard, options: []

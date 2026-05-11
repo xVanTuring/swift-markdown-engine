@@ -10,18 +10,9 @@ import MarkdownEngine
 
 struct ContentView: View {
     @State private var text: String = sampleMarkdown
-    @State private var isWikiLinkActive: Bool = false
-    @State private var pendingReplacement: InlineReplacementRequest?
 
     var body: some View {
-        NativeTextViewWrapper(
-            text: $text,
-            isWikiLinkActive: $isWikiLinkActive,
-            pendingInlineReplacement: $pendingReplacement,
-            configuration: .default,
-            fontName: "SF Pro",
-            documentId: "demo"
-        )
+        NativeTextViewWrapper(text: $text)
     }
 }
 
