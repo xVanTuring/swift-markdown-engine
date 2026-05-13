@@ -21,15 +21,27 @@ documentation tweaks are welcome as PRs directly.
 
 ## Development Setup
 
+Start by forking the repository on GitHub, then clone your fork locally:
+
 ```bash
-git clone https://github.com/luca-chen198/MarkdownEngine.git
-cd MarkdownEngine
+git clone https://github.com/YOUR-USERNAME/swift-markdown-engine.git
+cd swift-markdown-engine
+git remote add upstream https://github.com/nodes-app/swift-markdown-engine.git
+git fetch upstream
 swift build
 swift test
 ```
 
 Open `Package.swift` in Xcode for a graphical environment, or use the
 command line — both work.
+
+Before starting work, create a branch from the latest upstream `main`:
+
+```bash
+git checkout main
+git pull upstream main
+git checkout -b your-change-name
+```
 
 ### Generating documentation locally
 
@@ -48,8 +60,8 @@ Then run:
 swift package --disable-sandbox preview-documentation --target MarkdownEngine
 ```
 
-The plugin is intentionally **not** a permanent dependency to keep the
-shipped package's transitive deps at zero.
+The plugin is intentionally **not** a permanent dependency. The core
+`MarkdownEngine` product stays free of optional documentation tooling.
 
 ## Coding Conventions
 
@@ -60,8 +72,9 @@ shipped package's transitive deps at zero.
 - Keep file headers minimal; the file path implies what it contains
 - Favor `internal` over `public` — the smaller the public surface, the
   easier the package is to evolve
-- Avoid adding external dependencies. The engine ships with zero deps; that
-  is a design constraint, not an accident
+- Avoid adding external dependencies to the core `MarkdownEngine` product;
+  keeping the editor itself dependency-light is a design constraint, not an
+  accident
 
 ## Tests
 
@@ -72,7 +85,8 @@ shipped package's transitive deps at zero.
 
 ## Pull Requests
 
-- Branch from `main`
+- Fork the repository and open pull requests from a branch in your fork
+- Branch from the latest upstream `main`
 - Keep the change focused — one logical change per PR
 - Include test coverage for new behavior
 - Update `CHANGELOG.md` under `[Unreleased]` with a one-line summary
@@ -98,4 +112,4 @@ A short subject line, an empty line, then a paragraph (or two) explaining
 ## License
 
 By contributing, you agree that your contributions will be licensed under
-the [MIT License](LICENSE).
+the [Apache 2.0 License](LICENSE).

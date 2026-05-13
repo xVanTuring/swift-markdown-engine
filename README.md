@@ -2,7 +2,7 @@
 
 [![Swift 5.9](https://img.shields.io/badge/Swift-5.9+-F05138?logo=swift&logoColor=white)](https://swift.org)
 [![Platforms macOS 14+](https://img.shields.io/badge/Platforms-macOS%2014+-lightgrey)](https://developer.apple.com/macos/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-yellow.svg)](LICENSE)
 [![CI](https://github.com/nodes-app/swift-markdown-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/nodes-app/swift-markdown-engine/actions/workflows/ci.yml)
 
 
@@ -230,13 +230,15 @@ a local path, so any engine edit rebuilds into the demo on the next run.
 
 ## Documentation
 
-Full API documentation is available via DocC:
+Full API documentation is available via DocC. In Xcode, use
+**Product → Build Documentation** (`⇧⌃⌘D`).
+
+For local CLI preview, temporarily add the Swift DocC plugin as described in
+[CONTRIBUTING.md](CONTRIBUTING.md), then run:
 
 ```bash
-swift package generate-documentation --target MarkdownEngine
+swift package --disable-sandbox preview-documentation --target MarkdownEngine
 ```
-
-In Xcode: **Product → Build Documentation** (`⇧⌃⌘D`).
 
 Once the package is hosted on Swift Package Index, the docs will live at
 `https://swiftpackageindex.com/nodes-app/swift-markdown-engine/documentation`.
@@ -258,7 +260,7 @@ conventions, and PR process.
 
 ## License
 
-MarkdownEngine is released under the MIT License. See [LICENSE](LICENSE)
+MarkdownEngine is released under the Apache 2.0 License. See [LICENSE](LICENSE)
 for the full text.
 
 ---
