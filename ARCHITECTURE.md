@@ -16,9 +16,9 @@ Sources/
 │   │   ├── NativeTextView/                  # AppKit subclass + UX extensions (paste, drag-select, …)
 │   │   └── Coordinator/                     # NSTextViewDelegate split by concern (restyling, find, …)
 │   └── MarkdownEngine.docc/                 # DocC catalog
-├── MarkdownEngineCodeBlocks/                # opt-in SPM product
+├── MarkdownEngineCodeBlocks/                # opt-in SPM product — pulls in HighlighterSwift
 │   └── HighlighterSwiftBridge.swift         # SyntaxHighlighter conformance
-└── MarkdownEngineLatex/                     # opt-in SPM product
+└── MarkdownEngineLatex/                     # opt-in SPM product — pulls in SwiftMath
     └── SwiftMathBridge.swift                # LatexRenderer conformance
 ```
 
@@ -116,64 +116,3 @@ Application of `[StyledRange]` to text storage happens in
 per concern (headings, codeBlock, blockLatex, overscroll, markers,
 lists, …) — passed by reference into every styling pass via the
 `StylingContext`. `MarkdownEditorTheme` is its colour sub-field.
-
-## Adding a new inline syntax
-
-Worked example: spoilers `||hidden text||`. Four files change, all in
-the core target.
-
-**1.** `Parser/MarkdownToken.swift` — add a kind:
-
-```swift
-case spoiler
-```
-
-**2.** `Parser/MarkdownTokenizer.swift` — add a regex (model on
-`imageEmbedRegex` at the top of the file) and a parse loop inside
-`parseTokens(in:)`:
-
-```swift
-static let spoilerRegex = try! NSRegularExpression(
-    pattern: #"\|\|([^\|\r\n]+)\|\|"#
-)
-
-// inside parseTokens(in:)
-for match in spoilerRegex.matches(in: text, options: [], range: fullRange) {
-    let full = match.range
-    let content = match.range(at: 1)
-    let open = NSRange(location: full.location, length: 2)
-    let close = NSRange(location: full.location + full.length - 2, length: 2)
-    tokens.append(MarkdownToken(kind: .spoiler,
-                                range: full,
-                                contentRange: content,
-                                markerRanges: [open, close]))
-}
-```
-
-**3.** New file `Styling/MarkdownStyler+Spoiler.swift`:
-
-```swift
-import AppKit
-
-extension MarkdownStyler {
-    static func styleSpoilers(_ ctx: StylingContext) -> [StyledRange] {
-        var out: [StyledRange] = []
-        for token in ctx.tokens where token.kind == .spoiler {
-            out.append((token.contentRange,
-                        [.foregroundColor: NSColor.secondaryLabelColor]))
-        }
-        return out
-    }
-}
-```
-
-**4.** `Styling/MarkdownStyler.swift` — call the new pass in
-`styleAttributes()`, before `shrinkInactiveMarkers(ctx)`:
-
-```swift
-result += styleSpoilers(ctx)
-```
-
-Add a test in `Tests/MarkdownEngineTests/`, an entry in `CHANGELOG.md`
-under `[Unreleased]`, and you're done. No bridge-target changes are
-needed — new syntax types live entirely in the core engine.

@@ -5,9 +5,9 @@ expect 1–2 weeks for review.** Small fixes and documentation tweaks are
 welcome as PRs directly; for non-trivial features please open an issue
 first so we can talk through the design.
 
-> **New here?** Start with [ARCHITECTURE.md](ARCHITECTURE.md) — it's a
-> codemap of the engine and the two bridge targets, with a worked
-> example of adding a new inline syntax end-to-end.
+> **New here?** Start with [ARCHITECTURE.md](ARCHITECTURE.md) — a
+> codemap that walks each directory in the order text flows through
+> the engine.
 
 ## Development setup
 
@@ -64,11 +64,14 @@ Screen recordings welcome.
 
 Non-negotiable for the core `MarkdownEngine` target:
 
-- **Zero external dependencies.** Embedder behaviors go through the four
-  service protocols (`WikiLinkResolver`, `EmbeddedImageProvider`,
-  `SyntaxHighlighter`, `LatexRenderer`). The opt-in
-  `MarkdownEngineCodeBlocks` / `MarkdownEngineLatex` products may add
-  deps; the core may not.
+- **Don't add external dependencies to the core `MarkdownEngine`
+  target.** App-specific behaviors plug in through the four service
+  protocols (`WikiLinkResolver`, `EmbeddedImageProvider`,
+  `SyntaxHighlighter`, `LatexRenderer`) instead. The two existing
+  bridge products (`MarkdownEngineCodeBlocks` → HighlighterSwift,
+  `MarkdownEngineLatex` → SwiftMath) are the deliberate exception so
+  consumers can opt in. New bridges or new core deps need an issue
+  first.
 - **Public surface stays small.** Favor `internal`; new public symbols
   need a DocC comment.
 
