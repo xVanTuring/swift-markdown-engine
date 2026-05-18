@@ -1,9 +1,15 @@
-# MarkdownEngine
+<p align="center">                                                                                               
+<img width="128" alt="MDE-iOS-Default-1024x1024@1x" src="https://github.com/user-attachments/assets/88905708-9336-4cfe-8ce8-2be20866e89f" />
+</p>
 
-[![Swift 5.9](https://img.shields.io/badge/Swift-5.9+-F05138?logo=swift&logoColor=white)](https://swift.org)
-[![Platforms macOS 14+](https://img.shields.io/badge/Platforms-macOS%2014+-lightgrey)](https://developer.apple.com/macos/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-yellow.svg)](LICENSE)
-[![CI](https://github.com/nodes-app/swift-markdown-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/nodes-app/swift-markdown-engine/actions/workflows/ci.yml)
+<h1 align="center">SwiftMarkdownEngine</h1>  
+
+<p align="center">
+  <a href="https://swift.org"><img src="https://img.shields.io/badge/Swift-5.9+-F05138?logo=swift&logoColor=white" alt="Swift 5.9+" /></a>
+  <a href="https://developer.apple.com/macos/"><img src="https://img.shields.io/badge/Platforms-macOS%2014+-lightgrey" alt="Platforms macOS 14+" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-yellow.svg" alt="License: Apache 2.0" /></a>
+  <a href="https://github.com/nodes-app/swift-markdown-engine/actions/workflows/ci.yml"><img src="https://github.com/nodes-app/swift-markdown-engine/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+</p>
 
 
 
