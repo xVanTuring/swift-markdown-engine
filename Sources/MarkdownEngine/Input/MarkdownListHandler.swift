@@ -34,11 +34,11 @@ struct MarkdownLists {
     static let numberRegex = try! NSRegularExpression(pattern: #"^\s*(\d+)\.$"#)
     static let leadingWhitespaceRegex = try! NSRegularExpression(pattern: #"^\s*"#)
 
-    /// Matches `<tabs>- ` at the start of a line — the standard-Markdown bullet
-    /// form. Used by `normalizeBulletMarkers(_:)` to convert pasted/loaded
-    /// dash bullets into the engine's canonical `\t• ` form.
+    /// Matches `<tabs>- `, `<tabs>* ` or `<tabs>+ ` at the start of a line —
+    /// the three CommonMark bullet markers. Used by `normalizeBulletMarkers`
+    /// to convert pasted/loaded bullets into the engine's canonical `\t• `.
     static let pasteableDashBulletRegex = try! NSRegularExpression(
-        pattern: #"^([\t]*)- "#,
+        pattern: #"^([\t]*)[-+*] "#,
         options: [.anchorsMatchLines]
     )
 
@@ -50,12 +50,13 @@ struct MarkdownLists {
 
     // MARK: - Storage Normalization
 
-    /// Rewrite standard-Markdown dash bullets (`- foo`) to the engine's
-    /// canonical bullet form (`\t• foo`) so pasted or programmatically loaded
-    /// markdown renders with the same hanging indent and bullet glyph as
-    /// bullets the user types directly. The typed-input path already
-    /// rewrites `-` → `\t• ` on space-after-dash; this closes the gap for
-    /// every other ingestion path. Code blocks are left untouched.
+    /// Rewrite standard-Markdown bullets (`- foo`, `* foo`, `+ foo`) to the
+    /// engine's canonical bullet form (`\t• foo`) so pasted or
+    /// programmatically loaded markdown renders with the same hanging indent
+    /// and bullet glyph as bullets the user types directly. The typed-input
+    /// path already rewrites `-` → `\t• ` on space-after-dash; this closes
+    /// the gap for every other ingestion path. Code blocks are left
+    /// untouched.
     static func normalizeBulletMarkers(_ text: String) -> String {
         guard !text.isEmpty else { return text }
         let nsText = text as NSString
@@ -77,7 +78,8 @@ struct MarkdownLists {
                 continue
             }
             let wsLen = match.range(at: 1).length
-            // Replace just the "- " (length 2) after the leading tabs.
+            // Replace the 2-char marker+space (`- `, `* ` or `+ `) after
+            // the leading tabs with the canonical bullet.
             let dashRange = NSRange(location: lineStart + wsLen, length: 2)
             mutable.replaceCharacters(in: dashRange, with: "\t• ")
         }
