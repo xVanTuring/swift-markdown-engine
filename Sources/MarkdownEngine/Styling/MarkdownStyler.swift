@@ -324,17 +324,26 @@ extension MarkdownStyler {
 
 extension MarkdownStyler {
 
-    // MARK: Horizontal Rules ---
+    // MARK: Horizontal Rules --- *** ___
 
     static func styleHorizontalRules(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
-        let hrPattern = "^[ \\t]*-{3,}[ \\t]*$"
+        // CommonMark thematic break: a line of 3+ matching `-`, `*`, or `_`,
+        // optional surrounding whitespace.
+        let hrPattern = #"^[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*$"#
         if let hrRegex = try? NSRegularExpression(pattern: hrPattern, options: [.anchorsMatchLines]) {
             for hrMatch in hrRegex.matches(in: ctx.text, range: ctx.fullRange) {
-                attrs.append((hrMatch.range, [.foregroundColor: NSColor.clear]))
+                // Hide the source chars and tag the range so the layout
+                // fragment can paint a full-width rule. The previous
+                // implementation used a thick strikethrough across the
+                // matched chars; that worked only when an enter-handler
+                // had auto-expanded `---` to fill the container width,
+                // and never worked at all for `***`/`___`. With a
+                // dedicated marker the rule is always container-wide
+                // regardless of how many chars are in the source.
                 attrs.append((hrMatch.range, [
-                    .strikethroughStyle: NSUnderlineStyle.thick.rawValue,
-                    .strikethroughColor: ctx.configuration.theme.strikethroughColor
+                    .foregroundColor: NSColor.clear,
+                    .thematicBreak: true
                 ]))
                 let rulePara = NSMutableParagraphStyle()
                 attrs.append((hrMatch.range, [.paragraphStyle: rulePara]))

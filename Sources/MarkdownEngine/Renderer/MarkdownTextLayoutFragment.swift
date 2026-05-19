@@ -17,6 +17,7 @@ extension NSAttributedString.Key {
     static let latexBounds = NSAttributedString.Key("LatexImageBounds")
     static let latexIsBlock = NSAttributedString.Key("LatexIsBlock")
     static let latexBlockOffsetY = NSAttributedString.Key("LatexBlockOffsetY")
+    static let thematicBreak = NSAttributedString.Key("ThematicBreak")
 }
 
 final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
@@ -27,7 +28,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
     /// and block images drawn below text via paragraphSpacing.
     override var renderingSurfaceBounds: CGRect {
         var bounds = super.renderingSurfaceBounds
-        if hasCodeBlockBackground {
+        if hasCodeBlockBackground || hasThematicBreak {
             let containerWidth = textLayoutManager?.textContainer?.size.width ?? bounds.width
             // Extend left to container edge
             bounds.origin.x = -layoutFragmentFrame.origin.x
@@ -55,6 +56,10 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
         // 4. Task checkboxes (on top of hidden [ ]/[x] markers)
         drawTaskCheckboxes(at: point, in: context)
+
+        // 5. Thematic breaks (full-width line, painted last so it doesn't
+        //    fight with anything that already drew at the line's center)
+        drawThematicBreaks(at: point, in: context)
     }
 
     // MARK: - Helpers
@@ -121,6 +126,18 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         let bgColor = ts.attribute(.backgroundColor, at: range.location, effectiveRange: nil) as? NSColor
         guard let bgColor else { return false }
         return isCodeBlockBackgroundColor(bgColor)
+    }
+
+    private var hasThematicBreak: Bool {
+        guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return false }
+        var found = false
+        ts.enumerateAttribute(.thematicBreak, in: range, options: []) { value, _, stop in
+            if value as? Bool == true {
+                found = true
+                stop.pointee = true
+            }
+        }
+        return found
     }
 
     private func drawCodeBlockBackground(at point: CGPoint, in context: CGContext) {
@@ -272,6 +289,60 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
                                   width: imageBounds.width, height: imageBounds.height)
             }
             image.draw(in: drawRect)
+        }
+    }
+
+    // MARK: - Thematic Breaks (---, ***, ___)
+
+    /// Draw a 1pt horizontal rule across the full container width for any
+    /// line fragment whose backing text carries the `.thematicBreak`
+    /// attribute. This decouples HR rendering from the source-text length,
+    /// so a 3-char `---` looks the same as a 80-char auto-expanded line.
+    private func drawThematicBreaks(at point: CGPoint, in context: CGContext) {
+        guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return }
+        var hasThematic = false
+        ts.enumerateAttribute(.thematicBreak, in: range, options: []) { value, _, stop in
+            if value as? Bool == true {
+                hasThematic = true
+                stop.pointee = true
+            }
+        }
+        guard hasThematic else { return }
+
+        let containerWidth = textLayoutManager?.textContainer?.size.width ?? layoutFragmentFrame.width
+        let theme = (textLayoutManager?.textContainer?.textView as? NativeTextView)?
+            .configuration.theme ?? .default
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let nsContext = NSGraphicsContext(cgContext: context, flipped: true)
+        NSGraphicsContext.current = nsContext
+
+        let strokeColor = theme.strikethroughColor.withAlphaComponent(0.4)
+        strokeColor.setFill()
+
+        // Walk each line fragment in this layout fragment and paint a
+        // band on those whose first character carries the marker. (HR
+        // tokens are always single-line, but the loop is robust if a
+        // future caller ever stacks several rules in one paragraph.)
+        let fragLocation = fragmentNSRange?.location ?? 0
+        var lineY = point.y
+        for lineFragment in textLineFragments {
+            let lr = lineFragment.characterRange
+            let docStart = fragLocation + lr.location
+            let isHR = ts.attribute(.thematicBreak, at: docStart, effectiveRange: nil) as? Bool == true
+            let tb = lineFragment.typographicBounds
+            if isHR {
+                let centerY = lineY + tb.height / 2
+                let bandRect = CGRect(
+                    x: point.x - layoutFragmentFrame.origin.x,
+                    y: centerY - 0.5,
+                    width: containerWidth,
+                    height: 1
+                )
+                NSBezierPath(rect: bandRect).fill()
+            }
+            lineY += tb.height
         }
     }
 
