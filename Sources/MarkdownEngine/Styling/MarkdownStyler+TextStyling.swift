@@ -92,6 +92,52 @@ extension MarkdownStyler {
         return attrs
     }
 
+    // MARK: Blockquotes
+
+    static func styleBlockquotes(_ ctx: StylingContext) -> [StyledRange] {
+        var attrs: [StyledRange] = []
+        let indentPerLevel = MarkdownTextLayoutFragment.blockquoteIndentPerLevel
+        for (idx, token) in ctx.tokens.enumerated() where token.kind == .blockquote {
+            guard let markerRange = token.markerRanges.first else { continue }
+            let markerSub = ctx.nsText.substring(with: markerRange)
+            let level = max(1, markerSub.filter { $0 == ">" }.count)
+
+            // Indent the line so the text clears the drawn bar(s).
+            let textIndent = CGFloat(level) * indentPerLevel + indentPerLevel * 0.5
+            let para = NSMutableParagraphStyle()
+            para.firstLineHeadIndent = textIndent
+            para.headIndent = textIndent
+            para.minimumLineHeight = ctx.baseDefaultLineHeight
+            para.maximumLineHeight = ctx.baseDefaultLineHeight
+            para.paragraphSpacing = 0
+            para.paragraphSpacingBefore = 0
+            attrs.append((ctx.nsText.paragraphRange(for: token.range), [.paragraphStyle: para]))
+
+            // Quoted text reads muted; bold/code inside keep their own font.
+            if token.contentRange.length > 0 {
+                attrs.append((token.contentRange, [.foregroundColor: ctx.configuration.theme.mutedText]))
+            }
+
+            // Markers: revealed (muted) while editing this line, otherwise
+            // collapsed so only the painted bar shows.
+            let isActive = ctx.activeTokenIndices.contains(idx)
+            if isActive {
+                attrs.append((markerRange, [.foregroundColor: ctx.configuration.theme.mutedText]))
+            } else {
+                attrs.append((markerRange, [
+                    .foregroundColor: NSColor.clear,
+                    .font: ctx.inlineMarkerFont
+                ]))
+            }
+
+            // Tell the layout fragment how many bars to paint on this line.
+            attrs.append((NSRange(location: token.range.location, length: 1), [
+                .blockquoteLevel: level
+            ]))
+        }
+        return attrs
+    }
+
     // MARK: Bold / Italic / Bold+Italic
 
     static func styleEmphasis(_ ctx: StylingContext) -> [StyledRange] {

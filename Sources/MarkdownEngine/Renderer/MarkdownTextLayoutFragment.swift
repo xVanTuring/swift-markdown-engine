@@ -18,9 +18,17 @@ extension NSAttributedString.Key {
     static let latexIsBlock = NSAttributedString.Key("LatexIsBlock")
     static let latexBlockOffsetY = NSAttributedString.Key("LatexBlockOffsetY")
     static let thematicBreak = NSAttributedString.Key("ThematicBreak")
+    /// Int nesting level (1-based) of a blockquote line; the fragment
+    /// paints that many vertical bars in the left gutter.
+    static let blockquoteLevel = NSAttributedString.Key("BlockquoteLevel")
 }
 
 final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
+
+    /// Horizontal space (points) each blockquote nesting level occupies —
+    /// shared so the styler's text indent and the painted bars line up.
+    static let blockquoteIndentPerLevel: CGFloat = 18
+    static let blockquoteBarWidth: CGFloat = 3
 
     // MARK: - Rendering surface
 
@@ -28,7 +36,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
     /// and block images drawn below text via paragraphSpacing.
     override var renderingSurfaceBounds: CGRect {
         var bounds = super.renderingSurfaceBounds
-        if hasCodeBlockBackground || hasThematicBreak {
+        if hasCodeBlockBackground || hasThematicBreak || hasBlockquote {
             let containerWidth = textLayoutManager?.textContainer?.size.width ?? bounds.width
             // Extend left to container edge
             bounds.origin.x = -layoutFragmentFrame.origin.x
@@ -60,6 +68,9 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         // 5. Thematic breaks (full-width line, painted last so it doesn't
         //    fight with anything that already drew at the line's center)
         drawThematicBreaks(at: point, in: context)
+
+        // 6. Blockquote bars (left gutter, behind nothing — text is indented)
+        drawBlockquoteBars(at: point, in: context)
     }
 
     // MARK: - Helpers
@@ -133,6 +144,18 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         var found = false
         ts.enumerateAttribute(.thematicBreak, in: range, options: []) { value, _, stop in
             if value as? Bool == true {
+                found = true
+                stop.pointee = true
+            }
+        }
+        return found
+    }
+
+    private var hasBlockquote: Bool {
+        guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return false }
+        var found = false
+        ts.enumerateAttribute(.blockquoteLevel, in: range, options: []) { value, _, stop in
+            if value is Int {
                 found = true
                 stop.pointee = true
             }
@@ -341,6 +364,49 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
                     height: 1
                 )
                 NSBezierPath(rect: bandRect).fill()
+            }
+            lineY += tb.height
+        }
+    }
+
+    // MARK: - Blockquote Bars
+
+    /// Paint `level` vertical bars in the left gutter of every line that
+    /// carries `.blockquoteLevel`. Each line paints its own segment, so a
+    /// run of quote lines reads as one continuous bar.
+    private func drawBlockquoteBars(at point: CGPoint, in context: CGContext) {
+        guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return }
+        var anyLevel = false
+        ts.enumerateAttribute(.blockquoteLevel, in: range, options: []) { value, _, stop in
+            if value is Int { anyLevel = true; stop.pointee = true }
+        }
+        guard anyLevel else { return }
+
+        let theme = (textLayoutManager?.textContainer?.textView as? NativeTextView)?
+            .configuration.theme ?? .default
+        let indentPerLevel = Self.blockquoteIndentPerLevel
+        let barWidth = Self.blockquoteBarWidth
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let nsContext = NSGraphicsContext(cgContext: context, flipped: true)
+        NSGraphicsContext.current = nsContext
+        theme.mutedText.withAlphaComponent(0.5).setFill()
+
+        let fragLocation = fragmentNSRange?.location ?? 0
+        let leftEdge = point.x - layoutFragmentFrame.origin.x
+        var lineY = point.y
+        for lineFragment in textLineFragments {
+            let lr = lineFragment.characterRange
+            let docStart = fragLocation + lr.location
+            let tb = lineFragment.typographicBounds
+            if let level = ts.attribute(.blockquoteLevel, at: docStart, effectiveRange: nil) as? Int {
+                for i in 0..<level {
+                    let barX = leftEdge + CGFloat(i) * indentPerLevel + indentPerLevel * 0.25
+                    NSBezierPath(rect: CGRect(
+                        x: barX, y: lineY, width: barWidth, height: tb.height
+                    )).fill()
+                }
             }
             lineY += tb.height
         }

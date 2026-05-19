@@ -58,6 +58,12 @@ private extension MarkdownTokenizer {
         pattern: #"^[ \t]{0,3}(?![#>])(?![-=*_+ \t]*$)(\S[^\r\n]*?)[ \t]*\r?\n[ \t]{0,3}(=+|-+)[ \t]*$"#,
         options: [.anchorsMatchLines]
     )
+    // One blockquote line: optional ≤3-space indent, a run of `>` markers
+    // (each optionally followed by one space), then the quoted content.
+    static let blockquoteRegex = try! NSRegularExpression(
+        pattern: #"^[ \t]{0,3}((?:>[ \t]?)+)(.*)$"#,
+        options: [.anchorsMatchLines]
+    )
     static let taskListRegex = try! NSRegularExpression(
         pattern: #"^([ \t]*)([-•]|\d+\.)([ \t]+)(\[[ xX]\])(?=[ \t])"#,
         options: [.anchorsMatchLines]
@@ -302,6 +308,23 @@ enum MarkdownTokenizer {
                                         range: full,
                                         contentRange: textLine,
                                         markerRanges: [underline]))
+        }
+
+        // Blockquote lines. After fenced code so a `>` inside a code block
+        // stays literal. One token per line; the styler stitches the bar.
+        for match in blockquoteRegex.matches(in: text, options: [], range: fullRange) {
+            let full = match.range(at: 0)
+            let marker = match.range(at: 1)
+            let content = match.range(at: 2)
+            let inCode = tokens.contains {
+                ($0.kind == .codeBlock || $0.kind == .blockLatex)
+                && NSIntersectionRange($0.range, full).length > 0
+            }
+            if inCode { continue }
+            tokens.append(MarkdownToken(kind: .blockquote,
+                                        range: full,
+                                        contentRange: content,
+                                        markerRanges: [marker]))
         }
 
         // GFM tables. Parsed after code blocks so we can skip table-shaped
