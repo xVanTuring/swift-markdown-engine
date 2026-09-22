@@ -40,7 +40,8 @@ extension NativeTextViewCoordinator {
         let storageState = WikiLinkService.makeStorageState(
             from: sourceText,
             existingMetadata: wikiLinkMetadata,
-            textStorage: textView.textStorage
+            textStorage: textView.textStorage,
+            keepsImageIDsInSource: configuration.imageEmbed.keepsIDInSource
         )
         wikiLinkMetadata = storageState.metadata
         let storage = storageState.storage
@@ -78,7 +79,8 @@ extension NativeTextViewCoordinator {
         let storageState = WikiLinkService.makeStorageState(
             from: textView.string,
             existingMetadata: wikiLinkMetadata,
-            textStorage: textView.textStorage
+            textStorage: textView.textStorage,
+            keepsImageIDsInSource: configuration.imageEmbed.keepsIDInSource
         )
         wikiLinkMetadata = storageState.metadata
         lastComputedStorage = storageState.storage

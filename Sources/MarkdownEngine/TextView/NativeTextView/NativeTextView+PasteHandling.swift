@@ -141,7 +141,9 @@ extension NativeTextView {
     @discardableResult
     func insertStorageMarkdown(_ storage: String, replacing range: NSRange, actionName: String) -> NSRange? {
         let raw = configuration.rawSourceMode
-        let state = WikiLinkService.makeDisplayState(from: storage)
+        let state = WikiLinkService.makeDisplayState(
+            from: storage, keepsImageIDsInSource: configuration.imageEmbed.keepsIDInSource
+        )
         let text = raw ? storage : state.display
         let display = text as NSString
 
@@ -171,8 +173,11 @@ extension NativeTextView {
         guard let ts = textStorage, range.length > 0, NSMaxRange(range) <= ts.length else { return "" }
         let piece = ts.attributedSubstring(from: range)
         guard !configuration.rawSourceMode else { return piece.string }
-        return WikiLinkService.makeStorageState(from: piece.string, existingMetadata: [:],
-                                                textStorage: NSTextStorage(attributedString: piece)).storage
+        return WikiLinkService.makeStorageState(
+            from: piece.string, existingMetadata: [:],
+            textStorage: NSTextStorage(attributedString: piece),
+            keepsImageIDsInSource: configuration.imageEmbed.keepsIDInSource
+        ).storage
     }
 
     /// Reads the textual content of a pasted markdown/text file URL — the

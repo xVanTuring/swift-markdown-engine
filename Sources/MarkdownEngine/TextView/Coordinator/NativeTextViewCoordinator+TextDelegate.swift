@@ -181,7 +181,8 @@ extension NativeTextViewCoordinator {
                 ) ?? WikiLinkService.makeStorageState(
                     from: docString,
                     existingMetadata: wikiLinkMetadata,
-                    textStorage: tv.textStorage
+                    textStorage: tv.textStorage,
+                    keepsImageIDsInSource: configuration.imageEmbed.keepsIDInSource
                 )
             }
             self.wikiLinkMetadata = storageState.metadata
@@ -195,7 +196,8 @@ extension NativeTextViewCoordinator {
                 let reference = WikiLinkService.makeStorageState(
                     from: docString,
                     existingMetadata: wikiLinkMetadata,
-                    textStorage: tv.textStorage
+                    textStorage: tv.textStorage,
+                    keepsImageIDsInSource: configuration.imageEmbed.keepsIDInSource
                 )
                 assert(reference.storage == storageState.storage,
                        "wiki incremental splice diverged from full rebuild")
