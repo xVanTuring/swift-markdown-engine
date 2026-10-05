@@ -108,6 +108,33 @@ struct ImageEmbedIDInSourceTests {
                 == "![[a.png|\(Self.id)]]")
     }
 
+    /// Paste turns the private flavor's storage form into display form — which for
+    /// an embed that keeps its id in the source is the storage form itself. Moving
+    /// the suffix onto the attribute would lose it: the writeback ignores the
+    /// attribute for such an embed.
+    @Test func cutThenPasteKeepsTheIDInTheText() {
+        let (tv, coord) = makeEditor()
+        let embed = (tv.string as NSString).range(of: "![[a.png|\(Self.id)]]")
+        tv.setSelectedRange(embed)
+        tv.cut(nil)
+        tv.paste(nil)
+        #expect(tv.string == Self.doc)
+        #expect(coord.lastComputedStorage == Self.doc)
+    }
+
+    /// In one paste, the node link still hides its id and the embed still shows it.
+    @Test func aMixedPasteTreatsEachKindItsOwnWay() {
+        let storage = "[[Note|abc123]] ![[a.png|\(Self.id)]]"
+        let (source, _) = makeEditor(storage)
+        source.setSelectedRange(NSRange(location: 0, length: (source.string as NSString).length))
+        source.copy(nil)
+
+        let (target, coord) = makeEditor("")
+        target.paste(nil)
+        #expect(target.string == "[[Note]] ![[a.png|\(Self.id)]]")
+        #expect(coord.lastComputedStorage == storage)
+    }
+
     @Test func aHandTypedEmbedRoundTrips() {
         let (tv, coord) = makeEditor("Cover\n")
         tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
