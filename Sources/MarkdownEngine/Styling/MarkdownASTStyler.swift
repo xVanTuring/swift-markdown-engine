@@ -807,9 +807,15 @@ enum MarkdownASTStyler {
             }
         }
         // Use the whole block range (not codeRange): an incomplete fence collapses codeRange to the ```.
+        // Hidden by SIZE like every other marker, not only by a clear colour:
+        // NSTextView.selectedTextAttributes carries a `selectedTextColor` that
+        // repaints selected glyphs opaque, so colour-hidden fences (language
+        // label included) came back whenever the block was selected. The fence
+        // line keeps its height — the code paragraph style pins min = max line
+        // height, so the near-zero font only drops the glyph widths.
         let markerAttrs: [NSAttributedString.Key: Any] = ctx.isActive(range)
             ? [.foregroundColor: ctx.theme.mutedText, .font: ctx.codeFont]
-            : [.foregroundColor: NSColor.clear, .font: ctx.codeFont]   // hiddenMarkerFont == codeFont
+            : [.foregroundColor: NSColor.clear, .font: ctx.inlineMarkerFont]
         attrs.append((parts.openFence, markerAttrs))
         attrs.append((parts.closeFence, markerAttrs))
     }

@@ -267,7 +267,8 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
             height: snappedMaxY - snappedY
         )
 
-        let selectionRects = selectionRectsInDrawCoordinates(drawPoint: point, snappedY: snappedY, snappedMaxY: snappedMaxY)
+        let selectionRects = selectionRectsInDrawCoordinates(drawPoint: point, snappedY: snappedY,
+                                                             snappedMaxY: snappedMaxY, scale: scale)
         color.setFill()
         if selectionRects.isEmpty {
             NSBezierPath(rect: bgRect).fill()
@@ -284,12 +285,31 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
     /// Returns active text-selection rectangles intersecting this fragment, in
     /// the same draw-relative coordinate system used by `drawCodeBlockBackground`.
-    private func selectionRectsInDrawCoordinates(drawPoint: CGPoint, snappedY: CGFloat, snappedMaxY: CGFloat) -> [CGRect] {
+    ///
+    /// The rects must not overlap: they are cut out of the fill with the even-odd
+    /// rule, so a region covered twice gets filled again. Each rect therefore
+    /// spans only its own line. Stacked lines share an edge snapped with the same
+    /// rounding, and only the first / last line reach the fill's top / bottom
+    /// (covering the paragraph spacing a selected line would otherwise leave as a
+    /// strip of background). Expanding every segment to the whole fragment made
+    /// the lines of a soft-wrapped code line overlap and cancel each other's
+    /// cut-out, painting the background over the selection.
+    private func selectionRectsInDrawCoordinates(drawPoint: CGPoint, snappedY: CGFloat, snappedMaxY: CGFloat,
+                                                 scale: CGFloat) -> [CGRect] {
         guard let tlm = textLayoutManager else { return [] }
         var rects: [CGRect] = []
 
         let dx = drawPoint.x - layoutFragmentFrame.origin.x
+        let dy = drawPoint.y - layoutFragmentFrame.origin.y
         let myRange = self.rangeInElement
+
+        // Line boxes in fragment coordinates, minus the trailing empty line the
+        // fill also leaves out (see `effectiveHeight`).
+        var lines = textLineFragments
+        if lines.count > 1, lines.last?.characterRange.length == 0 { lines.removeLast() }
+        let firstLineMaxY = lines.first?.typographicBounds.maxY ?? .infinity
+        let lastLineMinY = lines.last?.typographicBounds.minY ?? -.infinity
+        func snap(_ y: CGFloat) -> CGFloat { (y * scale).rounded() / scale }
 
         for selection in tlm.textSelections {
             for textRange in selection.textRanges {
@@ -301,15 +321,12 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
                       let intersection = NSTextRange(location: interStart, end: interEnd) else { continue }
 
                 tlm.enumerateTextSegments(in: intersection, type: .selection, options: []) { _, segFrame, _, _ in
-                    // Expand vertically to match the bgRect's snapped span so the
-                    // even-odd cut-out is geometrically congruent with the fill.
-                    let drawRect = CGRect(
-                        x: segFrame.origin.x + dx,
-                        y: snappedY,
-                        width: segFrame.width,
-                        height: snappedMaxY - snappedY
-                    )
-                    rects.append(drawRect)
+                    let localMinY = segFrame.minY - layoutFragmentFrame.origin.y
+                    let localMaxY = segFrame.maxY - layoutFragmentFrame.origin.y
+                    let top = localMinY < firstLineMaxY - 0.5 ? snappedY : snap(segFrame.minY + dy)
+                    let bottom = localMaxY > lastLineMinY + 0.5 ? snappedMaxY : snap(segFrame.maxY + dy)
+                    guard bottom > top else { return true }
+                    rects.append(CGRect(x: segFrame.origin.x + dx, y: top, width: segFrame.width, height: bottom - top))
                     return true
                 }
             }
