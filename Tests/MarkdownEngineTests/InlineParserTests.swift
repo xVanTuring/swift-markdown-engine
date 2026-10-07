@@ -325,6 +325,67 @@ struct InlineParserTests {
         ])
     }
 
+    /// The source text of every formula and every bold span, in document order (nested ones included).
+    private func spans(_ source: String) -> (latex: [String], bold: [String]) {
+        let ns = source as NSString
+        var latex: [String] = [], bold: [String] = []
+        func walk(_ nodes: [InlineNode]) {
+            for node in nodes {
+                switch node {
+                case .inlineLatex(let range, _, _): latex.append(ns.substring(with: range))
+                case .emphasis(let kind, let range, _, let children):
+                    if kind == .bold { bold.append(ns.substring(with: range)) }
+                    walk(children)
+                case .link(_, _, _, _, let children): walk(children)
+                default: break
+                }
+            }
+        }
+        walk(InlineParser.parse(source))
+        return (latex, bold)
+    }
+
+    @Test("prime notation is math")
+    func primesAreLatex() {
+        for source in ["$y'$", "$y''$", "$f'$", "$xy'$", "$y'''$"] {
+            #expect(spans(source).latex == [source], "\(source)")
+        }
+        #expect(spans("$abcd'$").latex.isEmpty)
+    }
+
+    @Test("Chinese prose between two dollars is not math, Chinese inside \\text is")
+    func bareCJKNotLatex() {
+        #expect(spans("$ 用**常数**系数 $").latex.isEmpty)
+        #expect(spans("$ 用**常数**系数 $").bold == ["**常数**"])
+        #expect(spans(#"$x>0 \text{且} y>0$"#).latex == [#"$x>0 \text{且} y>0$"#])
+    }
+
+    @Test("one formula the heuristic misses no longer pairs the rest across Chinese prose")
+    func chineseSentenceWithPrimes() {
+        let source = #"它把 $y$、$y'$、$y''$ 用**常数**系数拼起来。这就要求 $y'$、$y''$ 和 $y$ 是"同一类东西""#
+        let s = spans(source)
+        #expect(s.latex == ["$y$", "$y'$", "$y''$", "$y'$", "$y''$", "$y$"])
+        #expect(s.bold == ["**常数**"])
+    }
+
+    @Test("bold closes before full-width punctuation even after an ASCII quote")
+    func boldBeforeFullWidthParen() {
+        #expect(spans(#"理由：**指数函数是"特征函数"**（和矩阵"#).bold == [#"**指数函数是"特征函数"**"#])
+        #expect(spans(#"理由：**指数函数是"特征函数"**(和矩阵"#).bold == [#"**指数函数是"特征函数"**"#])
+    }
+
+    @Test("bold next to CJK text with full-width quotes inside still works")
+    func boldBesideCJKQuotes() {
+        #expect(spans("的**“特征函数”**是").bold == ["**“特征函数”**"])
+        #expect(spans("“**特征函数**”").bold == ["**特征函数**"])
+        #expect(spans("（**注**）").bold == ["**注**"])
+        #expect(spans("系数：**常数**，").bold == ["**常数**"])
+        #expect(spans("“**$x$**”").bold == ["**$x$**"])
+        // Full-width punctuation still counts as a letter: strict CommonMark would reject both of these.
+        #expect(spans("前文**（注）**1后文").bold == ["**（注）**"])
+        #expect(spans("前文**“特征函数”**a后文").bold == ["**“特征函数”**"])
+    }
+
     // MARK: - Strikethrough (extension-supplied `~~…~~` span)
 
     private var strikeRegistry: ExtensionRegistry {

@@ -590,9 +590,12 @@ enum InlineParser {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         if isCurrencyLike(trimmed) { return false }
+        // Chinese / Japanese / Korean outside `\text{…}` is prose, not math (SwiftMath can't set it in math
+        // mode either). It's what pairs up when one `$…$` is missed: `$y$ 和 $x'$ 用**常数**系数 $z$`.
+        if hasBareCJK(trimmed) { return false }
         let mathyMatches = mathyCharCount(trimmed)
         if mathyMatches == 0 {
-            return (trimmed.count <= 3 && isAllAsciiLetters(trimmed)) || isFunctionNotation(trimmed)
+            return (trimmed.count <= 3 && isAllAsciiLetters(trimmed)) || isPrimed(trimmed) || isFunctionNotation(trimmed)
         }
         let tokenCount = trimmed.split(whereSeparator: { $0.isWhitespace }).count
         if mathyMatches >= 3 { return tokenCount <= 120 }
@@ -636,7 +639,7 @@ enum InlineParser {
     /// The whole content must have that shape, so prose such as `$5 (approx) and $` stays literal.
     private static func isFunctionNotation(_ s: String) -> Bool {
         let u = Array(s.utf16)
-        func letter(_ x: unichar) -> Bool { (x >= 0x41 && x <= 0x5A) || (x >= 0x61 && x <= 0x7A) }
+        let letter = isAsciiLetter
         func digit(_ x: unichar) -> Bool { x >= 0x30 && x <= 0x39 }
         var i = 0
         while i < u.count, letter(u[i]) { i += 1 }
@@ -649,6 +652,74 @@ enum InlineParser {
         }
         return sawOperand
     }
+
+    /// Derivative notation: a short name with primes — `y'`, `y''`, `f'`, `xy'`.
+    private static func isPrimed(_ s: String) -> Bool {
+        let u = Array(s.utf16)
+        var i = 0
+        while i < u.count, isAsciiLetter(u[i]) { i += 1 }
+        guard (1...3).contains(i), i < u.count else { return false }
+        while i < u.count, u[i] == 0x27 { i += 1 }
+        return i == u.count
+    }
+
+    /// CJK text outside a `\text{…}`-style group (whose contents SwiftMath does set as text).
+    private static func hasBareCJK(_ s: String) -> Bool {
+        let u = Array(s.unicodeScalars)
+        let textGroups: Set<String> = ["text", "textrm", "textbf", "textit", "textsf", "texttt", "mbox"]
+        var i = 0
+        while i < u.count {
+            let v = u[i].value
+            if v == UInt32(backslash) {
+                var j = i + 1
+                while j < u.count, u[j].isASCII, isAsciiLetter(unichar(u[j].value)) { j += 1 }
+                let name = String(String.UnicodeScalarView(u[(i + 1)..<j]))
+                if textGroups.contains(name), j < u.count, u[j] == "{" {
+                    var depth = 0
+                    var k = j
+                    while k < u.count {   // skip the group, nested braces included
+                        if u[k] == "{" { depth += 1 } else if u[k] == "}" { depth -= 1; if depth == 0 { break } }
+                        k += 1
+                    }
+                    i = k + 1
+                } else {
+                    i = max(j, i + 1)
+                }
+                continue
+            }
+            if isCJK(v) { return true }
+            i += 1
+        }
+        return false
+    }
+
+    /// Han, kana, Hangul, and the CJK / full-width punctuation that goes with them.
+    private static func isCJK(_ v: UInt32) -> Bool {
+        switch v {
+        case 0x1100...0x11FF,      // Hangul Jamo
+             0x2E80...0x2FFF,      // radicals, Kangxi, ideographic description
+             0x3000...0x303F,      // CJK symbols and punctuation (、。「」《》)
+             0x3040...0x31FF,      // kana, Bopomofo, Hangul compatibility Jamo, CJK strokes
+             0x3200...0x4DBF,      // enclosed / compatibility, Extension A
+             0x4E00...0x9FFF,      // unified ideographs
+             0xA960...0xA97F, 0xAC00...0xD7FF,   // Hangul
+             0xF900...0xFAFF,      // compatibility ideographs
+             0xFE30...0xFE4F,      // CJK compatibility forms
+             0xFF00...0xFFEF,      // half-width and full-width forms (，：（）…)
+             0x20000...0x3FFFF:    // Extensions B and later
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// For flanking: CJK, plus the punctuation Chinese shares with Western text and writes the same way —
+    /// curly quotes `“”‘’`, the dash `——` and the ellipsis `……` — so `“**$x$**”` closes like `“**特征**”`.
+    private static func isCJKNeighbour(_ v: UInt32) -> Bool {
+        isCJK(v) || (0x2014...0x201F).contains(v) || v == 0x2026
+    }
+
+    private static func isAsciiLetter(_ x: unichar) -> Bool { (x >= 0x41 && x <= 0x5A) || (x >= 0x61 && x <= 0x7A) }
 
     /// True when `s` is one or more ASCII letters only.
     private static func isAllAsciiLetters(_ s: String) -> Bool {
@@ -700,11 +771,19 @@ enum InlineParser {
 
             let before = i - 1, after = j
             let beforeWs = isWhitespaceOrBoundary(before, ns, len)
-            let beforePunct = isAsciiPunctuation(before, ns, len)
             let afterWs = isWhitespaceOrBoundary(after, ns, len)
-            let afterPunct = isAsciiPunctuation(after, ns, len)
-            let leftFlanking = !afterWs && (!afterPunct || beforeWs || beforePunct)
-            let rightFlanking = !beforeWs && (!beforePunct || afterWs || afterPunct)
+            let prev = scalar(endingAt: before, ns), next = scalar(startingAt: after, ns, len)
+            // Punctuation stays ASCII-only, so full-width `“”（）：` count as letters: strict CommonMark's
+            // Unicode punctuation would reject `的**“特征函数”**是` and `**（注）**1`, how Chinese is ordinarily
+            // written. What ASCII-only misses is an ASCII mark meeting CJK — `"特征函数"**（` could not close —
+            // so a CJK neighbour also counts like whitespace on its side (CJK-friendly flanking). This only
+            // ever widens the flanking rules, never narrows them.
+            let beforePunct = prev.map { $0.isASCII && isAsciiPunctuationChar(unichar($0.value)) } ?? false
+            let afterPunct = next.map { $0.isASCII && isAsciiPunctuationChar(unichar($0.value)) } ?? false
+            let beforeCJK = prev.map { isCJKNeighbour($0.value) } ?? false
+            let afterCJK = next.map { isCJKNeighbour($0.value) } ?? false
+            let leftFlanking = !afterWs && (!afterPunct || beforeWs || beforePunct || beforeCJK)
+            let rightFlanking = !beforeWs && (!beforePunct || afterWs || afterPunct || afterCJK)
 
             let canOpen: Bool, canClose: Bool
             if c == underscore {
@@ -887,9 +966,30 @@ enum InlineParser {
         return c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D
     }
 
-    private static func isAsciiPunctuation(_ idx: Int, _ ns: NSString, _ len: Int) -> Bool {
-        guard idx >= 0, idx < len else { return false }
-        return isAsciiPunctuationChar(ns.character(at: idx))
+    /// The scalar whose last UTF-16 unit is at `idx` (a surrogate pair read backwards); nil off the ends.
+    private static func scalar(endingAt idx: Int, _ ns: NSString) -> Unicode.Scalar? {
+        guard idx >= 0 else { return nil }
+        let c = ns.character(at: idx)
+        if UTF16.isTrailSurrogate(c), idx > 0 {
+            let lead = ns.character(at: idx - 1)
+            if UTF16.isLeadSurrogate(lead) { return combined(lead, c) }
+        }
+        return Unicode.Scalar(c)
+    }
+
+    /// The scalar whose first UTF-16 unit is at `idx`; nil off the ends.
+    private static func scalar(startingAt idx: Int, _ ns: NSString, _ len: Int) -> Unicode.Scalar? {
+        guard idx < len else { return nil }
+        let c = ns.character(at: idx)
+        if UTF16.isLeadSurrogate(c), idx + 1 < len {
+            let trail = ns.character(at: idx + 1)
+            if UTF16.isTrailSurrogate(trail) { return combined(c, trail) }
+        }
+        return Unicode.Scalar(c)
+    }
+
+    private static func combined(_ lead: unichar, _ trail: unichar) -> Unicode.Scalar? {
+        Unicode.Scalar(0x10000 + ((UInt32(lead) - 0xD800) << 10) + (UInt32(trail) - 0xDC00))
     }
 
     private static func isAsciiPunctuationChar(_ c: unichar) -> Bool {
