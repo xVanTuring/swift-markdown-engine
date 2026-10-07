@@ -80,12 +80,11 @@ extension MarkdownStyler {
         let blockquoteRanges = MarkdownStyler.StylingContext.indexed(ctx.tokens, .blockquote).map { $0.token.range }
         // Built once, not re-scanned per formula (latexFontSize was O(#latex × #tokens)).
         let headings = ctx.scoped(MarkdownStyler.StylingContext.indexed(ctx.tokens, .heading)).map { $0.token }
-        // Each textWidth is a CoreText measurement; the two "$" marker widths are
+        // Each textWidth is a CoreText measurement; the "$" marker width is
         // loop-invariant (fonts constant) and firstChar/restText repeat massively (2
         // distinct formulas × 1,594 tokens). Hoisting + memoizing removes all per-formula
         // width measurement — ENG-8g2b self ~186ms→~152ms on the 346k note (Debug).
         let tinyDollarWidth = HeadingHelpers.textWidth("$", font: ctx.latexMarkerFont)
-        let baseDollarWidth = HeadingHelpers.textWidth("$", font: ctx.baseFont)
         var markerFontWidthCache: [String: CGFloat] = [:]  // all measured with latexMarkerFont
         func markerFontWidth(_ s: String) -> CGFloat {
             if let cached = markerFontWidthCache[s] { return cached }
@@ -153,10 +152,19 @@ extension MarkdownStyler {
                         .foregroundColor: NSColor.clear,
                         .kern: -tinyDollarWidth
                     ]))
+                    // Hidden by SIZE like the rest of the source, not only by a clear colour:
+                    // NSTextView.selectedTextAttributes carries a `selectedTextColor` that
+                    // repaints selected glyphs opaque, so a full-size `$` came back under the
+                    // highlight, drawn over the next character. It used to stay full size to
+                    // lend the line its text descent; dropping it by that descent does the same,
+                    // so a line holding only the formula keeps the baseline of one with text.
                     let closeMarker = token.markerRanges[1]
+                    let textDescent = -ctx.baseFont.descender * latexFontSize / ctx.baseFont.pointSize
                     attrs.append((closeMarker, [
+                        .font: ctx.latexMarkerFont,
                         .foregroundColor: NSColor.clear,
-                        .kern: -baseDollarWidth
+                        .kern: -tinyDollarWidth,
+                        .baselineOffset: -textDescent
                     ]))
                 } else {
                     for markerRange in token.markerRanges {
