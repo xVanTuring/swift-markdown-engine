@@ -102,7 +102,10 @@ struct InlineSpanDensityTests {
             extensions: [HighlightExtension(), StrikethroughExtension()]
         ).extensionRegistry
 
-        #expect(fingerprint(corpus(4000), registry: registry) == "b74649ffbbbe237a")
+        // Re-pinned on purpose when backslashes inside `$…$` stopped being Markdown
+        // escapes: the 37 inputs that changed are all a `$…$` holding `\*`/`\``-style
+        // pairs, now one formula instead of literal text (`b74649ffbbbe237a` before).
+        #expect(fingerprint(corpus(4000), registry: registry) == "9ed17b752b9b942e")
     }
 
     // MARK: - Cost curve, counted

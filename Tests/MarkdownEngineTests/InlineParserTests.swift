@@ -264,6 +264,67 @@ struct InlineParserTests {
         ])
     }
 
+    @Test("a LaTeX command spelled backslash + punctuation (`\\,`) stays inside the math")
+    func latexPunctuationCommandIsNotAnEscape() {
+        // `\,` is a thin space in LaTeX, not a Markdown escape of `,` — claiming
+        // it as an escape used to reject the whole formula.
+        #expect(InlineParser.parse(#"$P\,dx + Q\,dy$"#) == [
+            .inlineLatex(range: r(0, 15), content: r(1, 13), markers: [r(0, 1), r(14, 1)]),
+        ])
+    }
+
+    @Test("an escape outside the math is still an escape")
+    func escapeBesideLatex() {
+        #expect(InlineParser.parse(#"\*$a\,b$"#) == [
+            .escape(range: r(0, 2), character: r(1, 1), marker: r(0, 1)),
+            .inlineLatex(range: r(2, 6), content: r(3, 4), markers: [r(2, 1), r(7, 1)]),
+        ])
+    }
+
+    @Test("an escaped dollar neither opens nor closes math")
+    func escapedDollarIsNotADelimiter() {
+        #expect(InlineParser.parse(#"\$a+b$"#) == [
+            .escape(range: r(0, 2), character: r(1, 1), marker: r(0, 1)),
+            .text(r(2, 4)),
+        ])
+        #expect(InlineParser.parse(#"$a+b\$"#) == [
+            .text(r(0, 4)),
+            .escape(range: r(4, 2), character: r(5, 1), marker: r(4, 1)),
+        ])
+    }
+
+    @Test("function-call notation is math even without operators")
+    func functionCallIsLatex() {
+        for source in ["$u(x,y)$", "$f(x)$", "$f'(x)$", "$(x, y)$", "$f(0.5)$"] {
+            let length = (source as NSString).length
+            #expect(InlineParser.parse(source) == [
+                .inlineLatex(range: r(0, length), content: r(1, length - 2),
+                             markers: [r(0, 1), r(length - 1, 1)]),
+            ], "\(source)")
+        }
+    }
+
+    @Test("prose between two dollars is still not math")
+    func proseBetweenDollarsNotLatex() {
+        for source in ["$5 (approx) and $", "$(US) and $", "$hello world$", "$f(x) and g$"] {
+            let length = (source as NSString).length
+            #expect(InlineParser.parse(source) == [.text(r(0, length))], "\(source)")
+        }
+    }
+
+    @Test("math inside bold keeps both")
+    func latexInsideBold() {
+        let source = #"**a $P\,dx$ b $u(x,y)$**"#
+        #expect(InlineParser.parse(source) == [
+            .emphasis(.bold, range: r(0, 24), markers: [r(0, 2), r(22, 2)], children: [
+                .text(r(2, 2)),
+                .inlineLatex(range: r(4, 7), content: r(5, 5), markers: [r(4, 1), r(10, 1)]),
+                .text(r(11, 3)),
+                .inlineLatex(range: r(14, 8), content: r(15, 6), markers: [r(14, 1), r(21, 1)]),
+            ]),
+        ])
+    }
+
     // MARK: - Strikethrough (extension-supplied `~~…~~` span)
 
     private var strikeRegistry: ExtensionRegistry {

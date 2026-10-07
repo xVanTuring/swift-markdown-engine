@@ -14,7 +14,10 @@
 //  there are never partial overlaps and buildTree is a clean containment tree):
 //    1. scanCodeSpans   — highest precedence, opaque interior.
 //    2. scanEscapes      — `\x` becomes a claimed span, so the escaped char is
-//                          automatically inert for every pass below.
+//                          automatically inert for every pass below. Steps over
+//                          a valid `$…$` whole: a backslash in math is LaTeX
+//                          (`\,`), and claiming it would make pass 3 reject the
+//                          formula.
 //    3. scanLinkFamily   — ![[…]], [[…]], ![…](…), […](…), $…$ (+ registered
 //                          extension spans) in precedence order. URLs allow
 //                          balanced parens. A candidate overlapping a claimed
@@ -298,6 +301,11 @@ enum InlineParser {
                     marker: NSRange(location: i, length: 1)
                 ))
                 i += 2   // the escaped char can't itself start a new escape (even/odd `\\`)
+            } else if ns.character(at: i) == dollar, peek(ns, i + 1, len) != dollar, !claimed.contains(i),
+                      let math = matchInlineLatex(ns, len, start: i), !claimed.overlaps(math.fullRange) {
+                // Inside `$…$` a backslash is LaTeX (`\,` `\{` `\|`), not Markdown. Claiming
+                // it here would make pass 3 reject the whole formula, so step over it.
+                i = NSMaxRange(math.fullRange)
             } else {
                 i += 1
             }
@@ -526,7 +534,9 @@ enum InlineParser {
             let ch = ns.character(at: k)
             if ch == newline { return nil }
             if ch == dollar {
-                guard k > contentStart, peek(ns, k + 1, len) != dollar else { return nil }
+                // An escaped `\$` closes nothing — the formula is rejected, as before
+                // escapes inside math were left to it.
+                guard k > contentStart, peek(ns, k + 1, len) != dollar, !isEscaped(k, ns) else { return nil }
                 let content = NSRange(location: contentStart, length: k - contentStart)
                 guard isInlineMathContent(ns.substring(with: content)) else { return nil }
                 return .inlineLatex(
@@ -582,7 +592,7 @@ enum InlineParser {
         if isCurrencyLike(trimmed) { return false }
         let mathyMatches = mathyCharCount(trimmed)
         if mathyMatches == 0 {
-            return trimmed.count <= 3 && isAllAsciiLetters(trimmed)
+            return (trimmed.count <= 3 && isAllAsciiLetters(trimmed)) || isFunctionNotation(trimmed)
         }
         let tokenCount = trimmed.split(whereSeparator: { $0.isWhitespace }).count
         if mathyMatches >= 3 { return tokenCount <= 120 }
@@ -620,6 +630,24 @@ enum InlineParser {
         var count = 0
         for u in s.utf16 where mathy.contains(u) { count += 1 }
         return count
+    }
+
+    /// Function-call / tuple notation with no operator in it — `f(x)`, `u(x,y)`, `f'(x)`, `(x, y)`.
+    /// The whole content must have that shape, so prose such as `$5 (approx) and $` stays literal.
+    private static func isFunctionNotation(_ s: String) -> Bool {
+        let u = Array(s.utf16)
+        func letter(_ x: unichar) -> Bool { (x >= 0x41 && x <= 0x5A) || (x >= 0x61 && x <= 0x7A) }
+        func digit(_ x: unichar) -> Bool { x >= 0x30 && x <= 0x39 }
+        var i = 0
+        while i < u.count, letter(u[i]) { i += 1 }
+        while i < u.count, u[i] == 0x27 { i += 1 }   // primes: f'(x)
+        guard i < u.count, u[i] == lparen, u.count - i > 2, u[u.count - 1] == rparen else { return false }
+        var sawOperand = false
+        for x in u[(i + 1)..<(u.count - 1)] {
+            if letter(x) || digit(x) { sawOperand = true; continue }
+            guard x == 0x2C || x == 0x20 || x == 0x2E || x == 0x27 else { return false }   // , space . '
+        }
+        return sawOperand
     }
 
     /// True when `s` is one or more ASCII letters only.
