@@ -49,7 +49,11 @@ let package = Package(
         ),
         .testTarget(
             name: "MarkdownEngineLatexTests",
-            dependencies: ["MarkdownEngine", "MarkdownEngineLatex"]
+            dependencies: [
+                "MarkdownEngine",
+                "MarkdownEngineLatex",
+                .product(name: "SwiftMath", package: "SwiftMath"),
+            ]
         )
     ]
 )
