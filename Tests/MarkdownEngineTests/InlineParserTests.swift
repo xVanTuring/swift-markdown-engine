@@ -250,9 +250,16 @@ struct InlineParserTests {
         ])
     }
 
-    @Test("currency-looking $…$ is not math")
-    func currencyNotLatex() {
-        #expect(InlineParser.parse("$50$") == [.text(r(0, 4))])
+    @Test("a plain number is math, prices in prose are not")
+    func numbersAreLatex() {
+        for source in ["$0$", "$1$", "$3.14$", "$-5$", "$1,000$"] {
+            let length = (source as NSString).length
+            #expect(InlineParser.parse(source) == [
+                .inlineLatex(range: r(0, length), content: r(1, length - 2),
+                             markers: [r(0, 1), r(length - 1, 1)]),
+            ], "\(source)")
+        }
+        #expect(InlineParser.parse("$5 and $10") == [.text(r(0, 10))])
     }
 
     @Test("a $…$ span that would cross a code span is not math (bug 3)")
@@ -434,7 +441,7 @@ struct InlineParserTests {
 
     @Test("an extension sharing a built-in trigger char is reachable when the built-in fails")
     func extensionReachableAfterBuiltInFails() {
-        // `$50$` is rejected by the built-in math heuristic (currency); a
+        // `$hello world$` is rejected by the built-in math heuristic (prose); a
         // registered `$…$` extension must still get its chance (fall-through).
         struct DollarSpan: MarkdownExtension {
             var id: String { "dollar-span" }
@@ -443,7 +450,7 @@ struct InlineParserTests {
             func html(childrenHTML: String) -> String { childrenHTML }
         }
         let registry = ExtensionRegistry(extensions: [DollarSpan()])
-        let nodes = InlineParser.parse("$50$", registry: registry)
+        let nodes = InlineParser.parse("$hello world$", registry: registry)
         guard case .ext(let node) = nodes.first else {
             Issue.record("expected extension span, got \(nodes)")
             return

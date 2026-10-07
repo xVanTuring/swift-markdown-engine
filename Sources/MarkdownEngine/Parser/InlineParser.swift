@@ -372,8 +372,8 @@ enum InlineParser {
                         markers: match.markers, parsesContent: match.parsesContent)
         }
         // Extensions match after every built-in, in registration order. A
-        // built-in trigger that matched-and-FAILED (e.g. `$50$` rejected by
-        // the math heuristic) falls through here, so an extension sharing a
+        // built-in trigger that matched-and-FAILED (e.g. `$hello world$` rejected
+        // by the math heuristic) falls through here, so an extension sharing a
         // built-in's first character is still reachable.
         let c = ns.character(at: i)
         for entry in registry.entries where entry.open.first == c {
@@ -585,11 +585,13 @@ enum InlineParser {
         return nil
     }
 
-    /// Rejects currency-looking and trivially short non-mathy `$…$` so prose isn't misread as math.
+    /// Rejects non-mathy `$…$` so prose isn't misread as math.
     private static func isInlineMathContent(_ content: String) -> Bool {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
-        if isCurrencyLike(trimmed) { return false }
+        // A plain number is math: `系数为 $0$` is everyday in math notes, while prices only come out
+        // as `$50$` when a dollar sits tight on both sides — `$5 and $10` never reaches here as a number.
+        if isPlainNumber(trimmed) { return true }
         // Chinese / Japanese / Korean outside `\text{…}` is prose, not math (SwiftMath can't set it in math
         // mode either). It's what pairs up when one `$…$` is missed: `$y$ 和 $x'$ 用**常数**系数 $z$`.
         if hasBareCJK(trimmed) { return false }
@@ -603,8 +605,8 @@ enum InlineParser {
         return tokenCount <= 6
     }
 
-    /// A plain signed/thousands-grouped/decimal number (`50`, `1,000.50`, `-5`), regex-free, so currency isn't math.
-    private static func isCurrencyLike(_ s: String) -> Bool {
+    /// A plain signed/thousands-grouped/decimal number (`50`, `1,000.50`, `-5`), regex-free.
+    private static func isPlainNumber(_ s: String) -> Bool {
         let u = Array(s.utf16)
         let n = u.count
         func digit(_ x: Int) -> Bool { x >= 0 && x < n && u[x] >= 0x30 && u[x] <= 0x39 }
