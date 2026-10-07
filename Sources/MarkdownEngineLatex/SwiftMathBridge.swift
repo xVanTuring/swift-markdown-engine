@@ -98,7 +98,19 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         render(latex: latex, mode: .inline, fontSize: fontSize, theme: theme)
     }
 
+    /// A formula's typesetting, bitmap and disk-cache passes leave ~0.6 MB of autoreleased temporaries.
+    /// A note styles all its formulas in a single pass, so without a pool per formula they pile up
+    /// until the pass ends: 500 cold formulas in one pass reached 334 MB, with the pool it stays flat.
     public func render(
+        latex: String,
+        mode: LatexRenderMode,
+        fontSize: CGFloat,
+        theme: MarkdownEditorTheme
+    ) -> LatexRenderResult? {
+        autoreleasepool { renderUnpooled(latex: latex, mode: mode, fontSize: fontSize, theme: theme) }
+    }
+
+    private func renderUnpooled(
         latex: String,
         mode: LatexRenderMode,
         fontSize: CGFloat,
@@ -206,6 +218,47 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
 
     // MARK: - Private
 
+    /// TeX's rules 5–6 for binary signs, applied the way TeX does: looking past spacing and style
+    /// changes. SwiftMath applies them in `MTMathList.finalized` against the atom right before the
+    /// sign, so in `x = \; -1` it sees the `\;`, keeps `-` binary, and the typesetter then meets
+    /// relation + binary — an invalid pair that trips `assert` in `getInterElementSpace` (a crash
+    /// in Debug builds; release builds drop the spacing). A sign settled here as unary stays so
+    /// through `finalized`, which only ever turns binary into unary.
+    static func settleBinarySigns(in list: MTMathList?) {
+        guard let list else { return }
+        var prev: MTMathAtom?
+        for atom in list.atoms {
+            settleBinarySigns(in: atom.subScript)
+            settleBinarySigns(in: atom.superScript)
+            switch atom {
+            case let a as MTFraction: settleBinarySigns(in: a.numerator); settleBinarySigns(in: a.denominator)
+            case let a as MTRadical: settleBinarySigns(in: a.radicand); settleBinarySigns(in: a.degree)
+            case let a as MTInner: settleBinarySigns(in: a.innerList)
+            case let a as MTOverLine: settleBinarySigns(in: a.innerList)
+            case let a as MTUnderLine: settleBinarySigns(in: a.innerList)
+            case let a as MTAccent: settleBinarySigns(in: a.innerList)
+            case let a as MTMathColor: settleBinarySigns(in: a.innerList)
+            case let a as MTMathTextColor: settleBinarySigns(in: a.innerList)
+            case let a as MTMathColorbox: settleBinarySigns(in: a.innerList)
+            case let a as MTMathTable: a.cells.joined().forEach { settleBinarySigns(in: $0) }
+            default: break
+            }
+            if atom.type == .space || atom.type == .style { continue }   // glue, not an atom, to TeX
+            switch atom.type {
+            case .binaryOperator:
+                if prev.map({ [.binaryOperator, .relation, .open, .punctuation, .largeOperator].contains($0.type) }) ?? true {
+                    atom.type = .unaryOperator
+                }
+            case .relation, .punctuation, .close:
+                if let p = prev, p.type == .binaryOperator { p.type = .unaryOperator }
+            default:
+                break
+            }
+            prev = atom
+        }
+        if let p = prev, p.type == .binaryOperator { p.type = .unaryOperator }
+    }
+
     /// Fold an `NSColor` to a 24-bit fingerprint that's good enough to
     /// bust the cache when the theme changes the LaTeX text color.
     private static func colorFingerprint(_ color: NSColor) -> UInt32 {
@@ -225,7 +278,12 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         // Reused instance (see `reusableLabel`); every property is set below so no
         // stale state carries between formulas.
         let mathLabel = reusableLabel
-        mathLabel.latex = latex
+        // Parsed here instead of through `mathLabel.latex` so binary signs beside spacing can be
+        // settled first (`settleBinarySigns`). A parse error still leaves no display list.
+        var parseError: NSError?
+        let mathList = MTMathListBuilder.build(fromString: latex, error: &parseError)
+        if parseError == nil { Self.settleBinarySigns(in: mathList) }
+        mathLabel.mathList = parseError == nil ? mathList : nil
         mathLabel.fontSize = fontSize
         mathLabel.textColor = textColor
         mathLabel.textAlignment = .left
