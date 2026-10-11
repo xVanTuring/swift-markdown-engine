@@ -105,7 +105,7 @@ struct MarkdownLists {
         // Fast path: plain characters never trigger list/pair/arrow handling.
         if replacementString.count == 1,
            let ch = replacementString.first,
-           ch != ">" && ch != "[" && ch != "(" && ch != "{" &&
+           ch != ">" && ch != "[" && ch != "]" && ch != "(" && ch != "{" &&
            ch != "\t" && ch != " " && ch != "\n" {
             return true
         }
@@ -136,6 +136,26 @@ struct MarkdownLists {
             if previousChar == "-" {
                 MarkdownLists.performEdit(textView, replace: previousCharRange, with: "→")
                 textView.setSelectedRange(NSRange(location: insertionLocation, length: 0))
+                return false
+            }
+        }
+
+        // `- [` + `]` → `- [ ]` (consumes the auto-closed `]` if present)
+        if replacementString == "]" && affectedCharRange.length == 0 && !isInCodeBlock
+            && activeConfig.lists.autoSpaceTaskCheckbox {
+            let nsText = textView.string as NSString
+            let loc = min(affectedCharRange.location, nsText.length)
+            let lineStart = nsText.lineRange(for: NSRange(location: loc, length: 0)).location
+            let before = nsText.substring(with: NSRange(location: lineStart, length: loc - lineStart))
+            if before.range(of: "^[ \\t]*([-*+]|\\d+[.)]) \\[$", options: .regularExpression) != nil {
+                let hasClose = loc < nsText.length && nsText.substring(with: NSRange(location: loc, length: 1)) == "]"
+                let afterClose = loc + (hasClose ? 1 : 0)
+                // Reuse a space that already follows, so `- [|] foo` doesn't get two.
+                let spaceFollows = afterClose < nsText.length
+                    && nsText.substring(with: NSRange(location: afterClose, length: 1)) == " "
+                let replaceRange = NSRange(location: loc, length: hasClose ? 1 : 0)
+                MarkdownLists.performEdit(textView, replace: replaceRange, with: spaceFollows ? " ]" : " ] ")
+                textView.setSelectedRange(NSRange(location: loc + 3, length: 0))
                 return false
             }
         }

@@ -318,6 +318,9 @@ public struct ListStyle: Sendable {
     public var helpersEnabled: Bool
     /// Master switch for auto-closing pairs `()`, `{}`, `[]` while typing.
     public var autoClosePairsEnabled: Bool
+    /// When `true`, typing `]` right after `- [` turns the empty checkbox
+    /// `- []` into `- [ ]`.
+    public var autoSpaceTaskCheckbox: Bool
     /// Indent (in points) that one nesting level adds to the list item.
     public var indentPerLevel: CGFloat
     /// Maximum nesting level reachable by pressing Tab inside a list.
@@ -328,12 +331,14 @@ public struct ListStyle: Sendable {
     public init(
         helpersEnabled: Bool = true,
         autoClosePairsEnabled: Bool = true,
+        autoSpaceTaskCheckbox: Bool = true,
         indentPerLevel: CGFloat = 27.5,
         maximumNestingLevel: Int = 3,
         extraLineHeight: CGFloat = 2
     ) {
         self.helpersEnabled = helpersEnabled
         self.autoClosePairsEnabled = autoClosePairsEnabled
+        self.autoSpaceTaskCheckbox = autoSpaceTaskCheckbox
         self.indentPerLevel = indentPerLevel
         self.maximumNestingLevel = maximumNestingLevel
         self.extraLineHeight = extraLineHeight
