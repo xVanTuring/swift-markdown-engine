@@ -18,11 +18,13 @@ extension MarkdownStyler.ParsedTable {
     // MARK: - Serialization
 
     /// Cell text as it must appear between pipes: a literal `|` is escaped and a
-    /// line break becomes `<br>` (a GFM row is one source line).
+    /// line break becomes `<br>` (a GFM row is one source line). Every break is
+    /// kept — leading, trailing and repeated ones too — since each is a visible
+    /// line in the cell; only spaces and tabs at the edges are trimmed.
     static func encodeCell(_ text: String) -> String {
         var out = ""
         var escaped = false
-        for ch in text.trimmingCharacters(in: .whitespacesAndNewlines) {
+        for ch in text.trimmingCharacters(in: .whitespaces) {
             if escaped {
                 out.append(ch)
                 escaped = false
@@ -31,8 +33,8 @@ extension MarkdownStyler.ParsedTable {
                 escaped = true
             } else if ch == "|" {
                 out.append("\\|")
-            } else if ch == "\n" || ch == "\r" {
-                if !out.hasSuffix("<br>") { out.append("<br>") }
+            } else if ch.isNewline {
+                out.append("<br>")
             } else {
                 out.append(ch)
             }

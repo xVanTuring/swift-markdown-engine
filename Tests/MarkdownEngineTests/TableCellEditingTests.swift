@@ -222,6 +222,21 @@ struct TableCellEditingTests {
         #expect(editor.string == "1\nsecond\nthird")
     }
 
+    /// A bare Return adds an empty line; it must not be trimmed away, or the row
+    /// would never grow until text follows.
+    @Test func aBareReturnGrowsTheRow() async throws {
+        let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        let heightBefore = editor.frame.height
+        editor.setSelectedRange(NSRange(location: 1, length: 0))
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        try await Task.sleep(nanoseconds: 300_000_000)
+        #expect(tv.string.contains("| 1<br> | 2 |"))
+        #expect(editor.frame.height > heightBefore)
+        #expect(editor.string == "1\n")
+    }
+
     @Test func leavingBeforeThePauseStillWritesTheCell() {
         let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
         #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
