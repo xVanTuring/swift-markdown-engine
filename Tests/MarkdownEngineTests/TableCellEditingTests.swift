@@ -198,6 +198,9 @@ struct TableCellEditingTests {
         let editor = try #require(tv.tableEditSession?.editor)
         #expect(!editor.isHidden)
         #expect(editor.superview === overlay.superview)
+        // The replacement overlay was added after the editor; the editor must
+        // still be drawn above it, or the table's own text shows through.
+        #expect(editor.superview?.subviews.last === editor)
         let cell = try #require(geometry.cellRect(row: 1, column: 1))
         #expect(abs(editor.frame.width - cell.width) < 1)
         #expect(abs(editor.frame.height - cell.height) < 1)

@@ -348,6 +348,8 @@ extension NativeTextView {
             layoutAlreadySettled: layoutAlreadySettled,
             knownWideTableAnchorRanges: wideTableAnchorRanges
         )
+        // The table was re-rendered at the new width; keep an open cell editor on its cell.
+        layoutTableCellEditor()
     }
 
     override func scrollRangeToVisible(_ range: NSRange) {
