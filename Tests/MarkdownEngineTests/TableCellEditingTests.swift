@@ -190,14 +190,44 @@ struct TableCellEditingTests {
         #expect(tv.tableEditSession?.column == 0)
     }
 
-    @Test func returnMovesDownAndAppendsAtTheEnd() {
+    @Test func returnBreaksTheLineInsideTheCell() throws {
         let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
-        #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 0, column: 1))
-        tv.moveTableCellEditor(.enter)
-        #expect(tv.tableEditSession?.row == 1)
-        #expect(tv.tableEditSession?.column == 1)
-        tv.moveTableCellEditor(.enter)
-        #expect(tv.tableEditSession?.row == 2)          // appended
+        #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        editor.setSelectedRange(NSRange(location: 1, length: 0))
+        editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+        #expect(editor.string == "1\n")
+        #expect(tv.tableEditSession?.row == 1)          // still in the same cell
+        #expect(tv.tableEditSession?.column == 0)
+    }
+
+    // MARK: Live sync
+
+    @Test func typingWritesThroughAndTheRowGrows() async throws {
+        let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        let heightBefore = editor.frame.height
+
+        editor.setSelectedRange(NSRange(location: 1, length: 0))
+        editor.insertText("\nsecond\nthird", replacementRange: editor.selectedRange())
+        // Not written yet: the write waits for typing to pause.
+        #expect(tv.string.contains("| 1 | 2 |"))
+
+        try await Task.sleep(nanoseconds: 500_000_000)
+        #expect(tv.string.contains("| 1<br>second<br>third | 2 |"))
+        // The table re-rendered taller and the editor followed its cell.
+        #expect(editor.frame.height > heightBefore)
+        #expect(tv.tableEditSession?.editor === editor)
+        #expect(editor.string == "1\nsecond\nthird")
+    }
+
+    @Test func leavingBeforeThePauseStillWritesTheCell() {
+        let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+        tv.tableEditSession?.editor.insertText("Z", replacementRange: NSRange(location: 1, length: 0))
+        tv.endTableCellEditing()
+        #expect(tv.string.contains("| 1Z | 2 |"))
     }
 
     @Test func shiftTabMovesBackAndStopsAtTheFirstCell() {
