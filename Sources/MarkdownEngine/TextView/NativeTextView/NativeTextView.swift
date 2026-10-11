@@ -205,6 +205,13 @@ final class NativeTextView: NSTextView {
         }
     }
 
+    // MARK: In-place table editing
+    /// The open cell editor, if any; managed by `NativeTextView+TableCellEditing.swift`.
+    var tableEditSession: TableEditSession?
+    /// True while the engine itself moves the caret or rewrites a table, so
+    /// that doesn't re-open a cell editor.
+    var suppressTableEntry = false
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         // Forward appearance changes to the embedder's highlighter via its registered notification.
