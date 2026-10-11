@@ -22,6 +22,8 @@ final class TableEditSession {
     /// Set once the session is being torn down, so a resign-first-responder
     /// triggered by the teardown itself doesn't end it a second time.
     var isFinishing = false
+    /// Pending write of the editor's text to the document (see `scheduleTableCellSync`).
+    var pendingSync: DispatchWorkItem?
 
     init(tableStart: Int, row: Int, column: Int, editor: TableCellEditorView) {
         self.tableStart = tableStart
@@ -37,8 +39,6 @@ enum TableCellMove {
     case next
     /// Shift-Tab: previous cell, wrapping to the previous row.
     case previous
-    /// Return: same column one row down; past the last row it appends a row.
-    case enter
     /// Up arrow on the first line: cell above; above the header leaves the table.
     case up
     /// Down arrow on the last line: cell below; below the last row leaves the table.
@@ -111,6 +111,7 @@ final class TableCellEditorView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         owner?.layoutTableCellEditor()
+        owner?.scheduleTableCellSync()
     }
 
     override func resignFirstResponder() -> Bool {
@@ -125,16 +126,6 @@ final class TableCellEditorView: NSTextView {
         return resigned
     }
 
-    /// Shift-Return is a line break inside the cell (stored as `<br>`).
-    override func keyDown(with event: NSEvent) {
-        let isReturn = event.keyCode == 36 || event.keyCode == 76
-        if isReturn, event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift) {
-            insertText("\n", replacementRange: selectedRange())
-            return
-        }
-        super.keyDown(with: event)
-    }
-
     override func doCommand(by selector: Selector) {
         guard let owner else { super.doCommand(by: selector); return }
         switch selector {
@@ -142,9 +133,11 @@ final class TableCellEditorView: NSTextView {
             owner.moveTableCellEditor(.next)
         case #selector(insertBacktab(_:)):
             owner.moveTableCellEditor(.previous)
-        case #selector(insertNewline(_:)):
-            owner.moveTableCellEditor(.enter)
-        case #selector(insertLineBreak(_:)), #selector(insertNewlineIgnoringFieldEditor(_:)):
+        case #selector(insertNewline(_:)),
+             #selector(insertLineBreak(_:)),
+             #selector(insertNewlineIgnoringFieldEditor(_:)):
+            // Return breaks the line inside the cell (stored as `<br>`); the
+            // row grows with it.
             insertText("\n", replacementRange: selectedRange())
         case #selector(cancelOperation(_:)):
             owner.endTableCellEditing(exit: .stay)
@@ -383,8 +376,6 @@ extension NativeTextView {
             if column < lastColumn { column += 1 } else if row < lastRow { row += 1; column = 0 } else { return }
         case .previous, .left:
             if column > 0 { column -= 1 } else if row > 0 { row -= 1; column = lastColumn } else { return }
-        case .enter:
-            if row < lastRow { row += 1 } else { appendsRow = true }
         case .up:
             if row > 0 { row -= 1 } else { endTableCellEditing(exit: .above); return }
         case .down:
@@ -421,6 +412,7 @@ extension NativeTextView {
     func endTableCellEditing(exit: TableExit = .stay, restoreFocus: Bool = true) {
         guard let session = tableEditSession, !session.isFinishing else { return }
         session.isFinishing = true
+        session.pendingSync?.cancel()
         if let (_, parsed) = table(startingAt: session.tableStart) {
             _ = commitCellText(of: session, into: parsed)
         }
@@ -451,6 +443,35 @@ extension NativeTextView {
     }
 
     // MARK: Document writes
+
+    /// How long typing pauses before the cell is written to the document.
+    private static let tableCellSyncDelay: TimeInterval = 0.25
+
+    /// Writes the cell to the document shortly after typing pauses, so the
+    /// table re-renders and its row grows with the text instead of the editor
+    /// spilling over the rows below. Waits while an input method is composing.
+    func scheduleTableCellSync() {
+        guard let session = tableEditSession, !session.isFinishing else { return }
+        session.pendingSync?.cancel()
+        let work = DispatchWorkItem { [weak self, weak session] in
+            guard let self, let session, !session.isFinishing, self.tableEditSession === session else { return }
+            if session.editor.hasMarkedText() {
+                self.scheduleTableCellSync()
+                return
+            }
+            self.syncTableCellToDocument()
+        }
+        session.pendingSync = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.tableCellSyncDelay, execute: work)
+    }
+
+    /// Writes the open cell's text into the document now (no-op when unchanged).
+    func syncTableCellToDocument() {
+        guard let session = tableEditSession, !session.isFinishing,
+              let (_, parsed) = table(startingAt: session.tableStart) else { return }
+        commitCellText(of: session, into: parsed)
+        layoutTableCellEditor()
+    }
 
     /// Puts the editor's text into `parsed` at the session's cell and, when
     /// that changes the table, replaces the table's source in one edit.
