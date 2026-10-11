@@ -154,6 +154,70 @@ struct TableCellEditingTests {
         #expect(tv.string == Self.wide + "\n")
     }
 
+    // MARK: Wide (scrolling) tables
+
+    /// Ten long columns: wider than the 800pt view, so it renders in a
+    /// horizontally scrolling overlay instead of in the text flow.
+    private static let wideTable: String = {
+        let columns = (0..<10).map { "Column\($0)xxxxxxxxxxxx" }
+        let header = "| " + columns.joined(separator: " | ") + " |"
+        let rule = "|" + String(repeating: " --- |", count: 10)
+        let row = "| " + (0..<10).map { "cell\($0)" }.joined(separator: " | ") + " |"
+        return [header, rule, row, row].joined(separator: "\n") + "\n"
+    }()
+
+    private func currentTableImage(_ tv: NativeTextView) -> NSImage? {
+        var found: NSImage?
+        tv.textStorage?.enumerateAttribute(
+            .latexImage, in: NSRange(location: 0, length: tv.textStorage?.length ?? 0)
+        ) { value, _, stop in
+            if let image = value as? NSImage, image.tableGeometry != nil { found = image; stop.pointee = true }
+        }
+        return found
+    }
+
+    @Test func aWideTableGetsAScrollingOverlay() {
+        let (tv, coordinator) = makeEditor(Self.wideTable); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.wideTableOverlays.count == 1)
+    }
+
+    /// The overlay is keyed by the table's content, so a structural edit replaces
+    /// it. The editor must follow the NEW overlay and image, not the stale ones.
+    @Test func theEditorFollowsTheNewOverlayAfterAColumnIsInserted() throws {
+        let (tv, coordinator) = makeEditor(Self.wideTable); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
+        tv.applyTableOperation(.insertColumnRight)
+
+        let image = try #require(currentTableImage(tv))
+        let geometry = try #require(image.tableGeometry)
+        #expect(geometry.columnCount == 11)
+        let overlay = try #require(tv.wideTableOverlays.values.first)
+        #expect(tv.wideTableOverlays.count == 1)
+        #expect(overlay.currentImage === image)
+
+        let editor = try #require(tv.tableEditSession?.editor)
+        #expect(!editor.isHidden)
+        #expect(editor.superview === overlay.superview)
+        let cell = try #require(geometry.cellRect(row: 1, column: 1))
+        #expect(abs(editor.frame.width - cell.width) < 1)
+        #expect(abs(editor.frame.height - cell.height) < 1)
+        // Vertically it sits inside the overlay's band, on the right row.
+        #expect(editor.frame.minY >= overlay.frame.minY - 1)
+        #expect(editor.frame.maxY <= overlay.frame.maxY + 1)
+    }
+
+    @Test func theEditorFollowsTheOverlayAfterAnAlignmentChange() throws {
+        let (tv, coordinator) = makeEditor(Self.wideTable); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 2))
+        tv.applyTableOperation(.align(.right))
+        let image = try #require(currentTableImage(tv))
+        let overlay = try #require(tv.wideTableOverlays.values.first)
+        #expect(overlay.currentImage === image)
+        let cell = try #require(image.tableGeometry?.cellRect(row: 1, column: 2))
+        let editor = try #require(tv.tableEditSession?.editor)
+        #expect(abs(editor.frame.width - cell.width) < 1)
+    }
+
     // MARK: The menu
 
     @Test func theMenuListsEveryOperationWithSeparatorsBetweenGroups() {

@@ -53,6 +53,9 @@ final class WideTableOverlay: NSScrollView {
     /// The view holding the table image, for placing a cell editor over it.
     var tableImageViewForEditing: NSView { tableImageView }
 
+    /// The image the overlay is showing right now.
+    var currentImage: NSImage? { tableImageView.image }
+
     init(sourceID: Int, image: NSImage, ownerTextView: NativeTextView, anchorLocation: Int) {
         self.sourceID = sourceID
         self.anchorTextLocation = anchorLocation

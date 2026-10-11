@@ -260,8 +260,14 @@ extension NativeTextView {
     ) -> (host: NSView, frame: NSRect)? {
         guard let cell = geometry.cellRect(row: row, column: column), let storage = textStorage else { return nil }
 
-        if let sourceID = storage.attribute(.scrollableBlockSourceID, at: anchor.location, effectiveRange: nil) as? Int,
-           let overlay = wideTableOverlays[sourceID] {
+        if let sourceID = storage.attribute(.scrollableBlockSourceID, at: anchor.location, effectiveRange: nil) as? Int {
+            // The overlay is keyed by the table's content and refreshed lazily,
+            // so right after an edit it can still be the old one (or missing).
+            // Bring it up to date first, or the editor lands on stale geometry.
+            if wideTableOverlays[sourceID]?.currentImage !== image {
+                updateWideTableOverlays(immediately: true)
+            }
+            guard let overlay = wideTableOverlays[sourceID], overlay.currentImage === image else { return nil }
             // The overlay's image view is not flipped; the geometry is top-down.
             let inImageView = NSRect(x: cell.minX, y: image.size.height - cell.maxY,
                                      width: cell.width, height: cell.height)
