@@ -473,7 +473,12 @@ extension NativeTextView {
         let raw = parsed.cell(row: session.row, column: session.column) ?? ""
         let editor = session.editor
         editor.string = MarkdownStyler.expandCellLineBreaks(raw)
-        editor.font = font ?? .systemFont(ofSize: NSFont.systemFontSize)
+        editor.font = tableCoordinator.map {
+            TextStylingService.makeBaseFontAndStyle(
+                fontName: $0.fontName, fontSize: $0.fontSize,
+                layoutBridge: $0.layoutBridge, configuration: $0.configuration
+            ).0
+        } ?? .systemFont(ofSize: NSFont.systemFontSize)
         editor.textColor = configuration.theme.bodyText
         editor.insertionPointColor = configuration.theme.bodyText
         editor.backgroundColor = backgroundColor.alphaComponent > 0 ? backgroundColor : .textBackgroundColor
