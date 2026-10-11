@@ -451,6 +451,14 @@ extension NativeTextViewCoordinator {
             filterImageEmbedActiveTokens(parsed: parsed, text: nsText, selectionLocation: selRange.location)
         }
 
+        // A caret that arrives inside a table (arrow keys, search, programmatic)
+        // opens that table's cell editor instead of sitting in hidden source.
+        if selRange.length == 0, !isProgrammaticEdit, !tv.hasMarkedText(),
+           currentEventType != .leftMouseDragged,
+           let nativeView = tv as? NativeTextView {
+            nativeView.enterTableIfCaretInside(location: selRange.location, previousLocation: previousCaretLocation)
+        }
+
         // The caret takes the ink of the span it sits in — an inverted highlight
         // paints dark ink on a light block, where a bodyText caret is drawn in
         // the block's own color and disappears. Placed after the active-token

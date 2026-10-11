@@ -95,6 +95,12 @@ public struct MarkdownEditorConfiguration: Sendable {
     public var directives: [any MarkdownDirective]
     /// Marker configuration for ``directives`` (default `@`).
     public var directiveSettings: DirectiveRegistrySettings
+    /// Edit a table in place: clicking a cell opens an editor on that cell
+    /// (its raw Markdown), Tab / Return / arrows move between cells, and the
+    /// table stays rendered instead of falling back to its `| a | b |` source.
+    /// When `false`, a table shows its source whenever the caret is inside it.
+    /// Has no effect in ``rawSourceMode``.
+    public var editsTablesInPlace: Bool
 
     public init(
         theme: MarkdownEditorTheme = .default,
@@ -125,7 +131,8 @@ public struct MarkdownEditorConfiguration: Sendable {
         extensions: [any MarkdownExtension] = [],
         cursorFollowsSpanInk: Bool = false,
         directives: [any MarkdownDirective] = [],
-        directiveSettings: DirectiveRegistrySettings = .default
+        directiveSettings: DirectiveRegistrySettings = .default,
+        editsTablesInPlace: Bool = true
     ) {
         self.theme = theme
         self.services = services
@@ -156,6 +163,7 @@ public struct MarkdownEditorConfiguration: Sendable {
         self.cursorFollowsSpanInk = cursorFollowsSpanInk
         self.directives = directives
         self.directiveSettings = directiveSettings
+        self.editsTablesInPlace = editsTablesInPlace
     }
 
     public static let `default` = MarkdownEditorConfiguration()

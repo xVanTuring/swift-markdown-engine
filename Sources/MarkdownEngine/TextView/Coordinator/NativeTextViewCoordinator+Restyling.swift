@@ -206,6 +206,7 @@ extension NativeTextViewCoordinator {
         // Reconcile wide-table overlays after layout settles.
         if let nativeTextView = textView as? NativeTextView {
             nativeTextView.updateWideTableOverlays()
+            nativeTextView.layoutTableCellEditor()
         }
     }
 
@@ -256,6 +257,7 @@ extension NativeTextViewCoordinator {
         if case .all = content,
            let nativeTextView = textView as? NativeTextView {
             nativeTextView.updateWideTableOverlays()
+            nativeTextView.layoutTableCellEditor()
         }
         return wideTableAnchorRanges
     }
@@ -362,12 +364,19 @@ extension NativeTextViewCoordinator {
     func activeTokenIndices(parsed: ParsedDocument, selection: NSRange, in text: NSString, suppressed: Bool) -> Set<Int> {
         if let memo = activeTokenMemo, memo.version == parsed.version,
            memo.selection == selection, memo.suppressed == suppressed {
-            return memo.result
+            return withoutInPlaceTables(memo.result, tokens: parsed.tokens)
         }
         let result = MarkdownDetection.computeActiveTokenIndices(
             selectionRange: selection, tokens: parsed.tokens, in: text, suppressed: suppressed)
         activeTokenMemo = (parsed.version, selection, suppressed, result)
-        return result
+        return withoutInPlaceTables(result, tokens: parsed.tokens)
+    }
+
+    /// With in-place editing a table stays rendered while the caret is in it
+    /// (the cell editor is the editing surface), so it is never "active".
+    private func withoutInPlaceTables(_ active: Set<Int>, tokens: [MarkdownToken]) -> Set<Int> {
+        guard configuration.editsTablesInPlace, !configuration.rawSourceMode else { return active }
+        return active.filter { $0 >= 0 && $0 < tokens.count && tokens[$0].kind != .table }
     }
 
     func paragraphRanges(

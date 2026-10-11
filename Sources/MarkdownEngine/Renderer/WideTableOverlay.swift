@@ -50,6 +50,9 @@ final class WideTableOverlay: NSScrollView {
 
     private let tableImageView: WideTableImageView
 
+    /// The view holding the table image, for placing a cell editor over it.
+    var tableImageViewForEditing: NSView { tableImageView }
+
     init(sourceID: Int, image: NSImage, ownerTextView: NativeTextView, anchorLocation: Int) {
         self.sourceID = sourceID
         self.anchorTextLocation = anchorLocation
@@ -157,6 +160,17 @@ final class WideTableImageView: NSImageView {
         guard location >= 0, location <= docLen else {
             super.mouseDown(with: event)
             return
+        }
+        if textView.canEditTablesInPlace,
+           let image = image, let geometry = image.tableGeometry,
+           let token = textView.tableToken(containing: location) {
+            // This view is not flipped; the geometry is top-down.
+            let local = convert(event.locationInWindow, from: nil)
+            let imagePoint = CGPoint(x: local.x, y: bounds.height - local.y)
+            if let cell = geometry.cell(at: imagePoint),
+               textView.beginTableCellEditing(tableStart: token.range.location, row: cell.row, column: cell.column) {
+                return
+            }
         }
         textView.window?.makeFirstResponder(textView)
         textView.setSelectedRange(NSRange(location: location, length: 0))
