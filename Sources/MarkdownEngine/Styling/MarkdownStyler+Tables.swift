@@ -672,7 +672,7 @@ extension MarkdownStyler {
         let headerFill = mutedColor(alpha: 0.08)
 
         // Flipped image so AppKit handles the y-flip; a manual transform mirror would flip glyphs too.
-        return NSImage(size: size, flipped: true) { _ in
+        let image = NSImage(size: size, flipped: true) { _ in
             // Header row fill
             headerFill.setFill()
             NSBezierPath(rect: NSRect(
@@ -747,6 +747,13 @@ extension MarkdownStyler {
             }
             return true
         }
+        image.tableGeometry = TableGeometry(
+            columnLeft: columnLeft,
+            rowTop: rowTop,
+            borderWidth: borderWidth,
+            imageSize: size
+        )
+        return image
     }
 
     // MARK: - Scrollable table helpers
