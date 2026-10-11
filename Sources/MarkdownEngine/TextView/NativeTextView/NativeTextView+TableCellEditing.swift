@@ -550,6 +550,19 @@ extension NativeTextView {
             editor.removeFromSuperview()
             placed.host.addSubview(editor)
         }
+        // A table overlay that was replaced after the editor was added sits
+        // above it, and the table image is transparent — the cell's own text
+        // would show through. Move the editor to the top. Re-adding it would
+        // make it resign first responder, so reorder in place instead.
+        if placed.host.subviews.last !== editor {
+            placed.host.sortSubviews({ a, b, context in
+                guard let context else { return .orderedSame }
+                let top = Unmanaged<NSView>.fromOpaque(context).takeUnretainedValue()
+                if a === top { return .orderedDescending }
+                if b === top { return .orderedAscending }
+                return .orderedSame
+            }, context: Unmanaged.passUnretained(editor).toOpaque())
+        }
         var frame = placed.frame
         editor.frame = frame
         // Taller text pushes the editor's bottom edge down over the rows below.

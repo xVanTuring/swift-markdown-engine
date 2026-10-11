@@ -989,4 +989,66 @@ struct TableWidthChangeRestyleTests {
         #expect(settled.image === live.image)
         #expect(recorder.count == countAtTrackingEnd)
     }
+
+    /// Seven prose columns: cells wrap as the window changes, and the minimum widths
+    /// still overflow a narrow window, so the table scrolls.
+    private static let proseTable: String = {
+        let words = "Characteristic preoccupations of the modernist novel and its Schopenhauer-inflected pessimism"
+        let header = "| " + (0..<7).map { "Heading\($0) words" }.joined(separator: " | ") + " |"
+        let rule = "|" + String(repeating: "---|", count: 7)
+        let row = "| " + (0..<7).map { _ in words }.joined(separator: " | ") + " |"
+        return "# Prose table\n\n" + [header, rule, row, row, row].joined(separator: "\n") + "\n\n## Tail\n\nThe table stays inactive while resizing.\n"
+    }()
+
+    // MARK: Resizing with a cell editor open
+
+    /// Where the paragraph that follows the table starts, in text-view coordinates.
+    private func tailTop(_ harness: Harness, marker: String) throws -> CGFloat {
+        let tv = harness.textView
+        let range = (tv.string as NSString).range(of: marker)
+        #expect(range.location != NSNotFound)
+        let bridge = try #require(tv.layoutBridge)
+        let container = try #require(bridge.firstTextContainer)
+        return tv.textContainerOrigin.y + bridge.boundingRect(forCharacterRange: range, in: container).minY
+    }
+
+    private func resizeWithEditor(openEditor: Bool, edit: Bool = false, widths: [CGFloat] = [820, 760, 700, 640, 580]) throws -> (overlayBottom: CGFloat, tailTop: CGFloat, editorOK: Bool) {
+        let harness = try Harness(source: Self.proseTable)
+        defer { harness.close() }
+        let tv = harness.textView
+        if openEditor {
+            let start = (tv.string as NSString).range(of: "| Heading0").location
+            #expect(tv.beginTableCellEditing(tableStart: start, row: 1, column: 1))
+        }
+        if edit {
+            tv.applyTableOperation(.insertColumnRight)
+            tv.applyTableOperation(.align(.right))
+            tv.tableEditSession?.editor.insertText("typed words", replacementRange: NSRange(location: 0, length: 0))
+            Harness.drain(mode: .default, duration: 0.3)
+        }
+        _ = harness.runInEventTracking(widths: widths)
+        Harness.drain(mode: .default, duration: 0.2)
+        let overlay = try #require(tv.wideTableOverlays.values.first)
+        var editorOK = true
+        if openEditor, let editor = tv.tableEditSession?.editor,
+           let geometry = overlay.currentImage?.tableGeometry,
+           let cell = geometry.cellRect(row: 1, column: 1) {
+            editorOK = abs(editor.frame.width - cell.width) < 1 && !editor.isHidden
+        }
+        return (overlay.frame.maxY, try tailTop(harness, marker: "The table stays inactive while resizing"), editorOK)
+    }
+    @Test("A cell editor follows its cell and stays on top through a live resize")
+    func cellEditorSurvivesLiveResize() throws {
+        for edit in [false, true] {
+            let r = try resizeWithEditor(openEditor: true, edit: edit)
+            #expect(r.tailTop >= r.overlayBottom - 1, "text below the table must start under it (edited: \(edit))")
+            #expect(r.editorOK, "editor must sit on its cell (edited: \(edit))")
+        }
+    }
+
+    @Test("Resizing without a cell editor still leaves the text below the table")
+    func resizeWithoutEditorKeepsTextBelow() throws {
+        let r = try resizeWithEditor(openEditor: false)
+        #expect(r.tailTop >= r.overlayBottom - 1)
+    }
 }
