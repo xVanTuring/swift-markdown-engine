@@ -1051,4 +1051,46 @@ struct TableWidthChangeRestyleTests {
         let r = try resizeWithEditor(openEditor: false)
         #expect(r.tailTop >= r.overlayBottom - 1)
     }
+
+    // MARK: Container lagging the view
+
+    /// Window resizing changes the text view's width before a width-tracking text
+    /// container publishes its own. A table update that ran in that gap measured
+    /// the old layout; once the container catches up it must run again, or the
+    /// overlay stays at the old layout's position over other text.
+    @Test("A table update made while the container lags repeats once it catches up")
+    func tableUpdateRepeatsWhenTheContainerCatchesUp() async throws {
+        let harness = try Harness(source: Self.wideTable)
+        defer { harness.close() }
+        let tv = harness.textView
+        let container = try #require(tv.textContainer)
+        let viewWidth = tv.bounds.width - tv.textContainerInset.width * 2
+
+        // The container is still at an older, narrower width.
+        container.widthTracksTextView = false
+        container.size = NSSize(width: viewWidth - 200, height: .greatestFiniteMagnitude)
+        container.widthTracksTextView = true
+        tv.performTableWidthChangeUpdate()
+        #expect(tv.containerCatchUpArmed)
+        let lagging = try #require(Harness.visibleWideTable(in: tv))
+        #expect(abs(lagging.frame.width - (viewWidth - 200)) <= 1)
+
+        // The container catches up; the update must run again on its own.
+        container.size = NSSize(width: viewWidth, height: .greatestFiniteMagnitude)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!tv.containerCatchUpArmed)
+        let caughtUp = try #require(Harness.visibleWideTable(in: tv))
+        #expect(abs(caughtUp.frame.width - viewWidth) <= 1)
+    }
+
+    @Test("No catch-up is armed when the container already matches the view")
+    func noCatchUpWhenTheContainerMatches() throws {
+        let harness = try Harness(source: Self.wideTable)
+        defer { harness.close() }
+        let tv = harness.textView
+        let container = try #require(tv.textContainer)
+        container.size = NSSize(width: tv.bounds.width - tv.textContainerInset.width * 2, height: .greatestFiniteMagnitude)
+        tv.performTableWidthChangeUpdate()
+        #expect(!tv.containerCatchUpArmed)
+    }
 }
