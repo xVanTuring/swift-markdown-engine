@@ -81,6 +81,46 @@ struct TableCellEditingTests {
         #expect(!tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
     }
 
+    // MARK: The switch
+
+    @Test func switchingItOffWhileACellIsOpenCommitsAndCloses() {
+        let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+        tv.tableEditSession?.editor.string = "typed"
+        var off = tv.configuration
+        off.editsTablesInPlace = false
+        tv.configuration = off
+        #expect(tv.tableEditSession == nil)
+        #expect(tv.string.contains("| typed | 2 |"))
+    }
+
+    @Test func rawSourceModeNeverOpensACellEditor() {
+        let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
+        var raw = tv.configuration
+        raw.rawSourceMode = true
+        tv.configuration = raw
+        #expect(!tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+        #expect(tv.tableEditSession == nil)
+    }
+
+    @Test func aReadOnlyViewNeverOpensACellEditor() {
+        let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
+        tv.isEditable = false
+        #expect(!tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+    }
+
+    @Test func caretEntryIsIgnoredWhenTheSwitchIsOff() async throws {
+        let (tv, coordinator) = makeEditor(editsInPlace: false); defer { withExtendedLifetime(coordinator) {} }
+        tv.enterTableIfCaretInside(location: Self.tableStart + 2, previousLocation: 0)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(tv.tableEditSession == nil)
+    }
+
+    @Test func theDefaultIsOn() {
+        #expect(MarkdownEditorConfiguration.default.editsTablesInPlace)
+        #expect(MarkdownEditorConfiguration().editsTablesInPlace)
+    }
+
     // MARK: Opening
 
     @Test func openingACellShowsItsRawMarkdown() throws {
