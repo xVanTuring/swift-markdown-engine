@@ -327,7 +327,7 @@ extension NativeTextView {
         performTableWidthChangeUpdate()
     }
 
-    private func performTableWidthChangeUpdate() {
+    func performTableWidthChangeUpdate() {
         var layoutAlreadySettled = false
         var wideTableAnchorRanges: [NSRange]?
         if configuration.readingWidth == nil {
@@ -350,6 +350,41 @@ extension NativeTextView {
         )
         // The table was re-rendered at the new width; keep an open cell editor on its cell.
         layoutTableCellEditor()
+        armContainerCatchUp()
+    }
+
+    /// While the window is being resized, the text view's width changes before
+    /// a width-tracking text container publishes its own, and the document is
+    /// only re-laid-out once the container does. Everything the table update
+    /// measured (anchor positions, overlay frames, wrapped heights) came from
+    /// the old layout, and nothing else triggers another pass — tables would
+    /// stay at the previous layout's positions, over other text. So watch for
+    /// the container to catch up and then run the table update once more.
+    private func armContainerCatchUp() {
+        guard !containerCatchUpArmed, configuration.readingWidth == nil,
+              let container = textContainer, container.widthTracksTextView,
+              !containerMatchesViewWidth(container) else { return }
+        containerCatchUpArmed = true
+        pollContainerCatchUp(remaining: 90)
+    }
+
+    private func containerMatchesViewWidth(_ container: NSTextContainer) -> Bool {
+        abs(container.size.width - (bounds.width - textContainerInset.width * 2)) < 0.5
+    }
+
+    private func pollContainerCatchUp(remaining: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in
+            guard let self else { return }
+            guard let container = self.textContainer else { self.containerCatchUpArmed = false; return }
+            if self.containerMatchesViewWidth(container) {
+                self.containerCatchUpArmed = false
+                self.performTableWidthChangeUpdate()
+            } else if remaining > 0 {
+                self.pollContainerCatchUp(remaining: remaining - 1)
+            } else {
+                self.containerCatchUpArmed = false
+            }
+        }
     }
 
     override func scrollRangeToVisible(_ range: NSRange) {

@@ -87,6 +87,8 @@ final class NativeTextView: NSTextView {
     /// True while the engine itself moves the caret or rewrites a table, so
     /// that doesn't re-open a cell editor.
     var suppressTableEntry = false
+    /// A re-check of the table layout is waiting for the text container to catch up with the view width.
+    var containerCatchUpArmed = false
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()

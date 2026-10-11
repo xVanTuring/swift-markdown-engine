@@ -319,6 +319,7 @@ extension NativeTextView {
 
         // Settle layout before measuring — stale fragments would yield wrong anchor Ys.
         let overlayT0 = DispatchTime.now().uptimeNanoseconds
+        var didEnsureLayout = !layoutAlreadySettled
         if !layoutAlreadySettled {
             tlm.ensureLayout(for: tlm.documentRange)
         }
@@ -344,7 +345,16 @@ extension NativeTextView {
                   ) as? NSImage else { continue }
             seenSourceIDs.insert(sourceID)
 
-            let anchorRect = bridge.boundingRect(forCharacterRange: attrRange, in: container)
+            var anchorRect = bridge.boundingRect(forCharacterRange: attrRange, in: container)
+            if anchorRect.isEmpty, !didEnsureLayout {
+                // The caller vouched that layout was settled, but TextKit had
+                // invalidated it (a width change mid-drag): there is no text
+                // segment to measure, and skipping the table here would leave
+                // its overlay at the previous width's position — over other text.
+                tlm.ensureLayout(for: tlm.documentRange)
+                didEnsureLayout = true
+                anchorRect = bridge.boundingRect(forCharacterRange: attrRange, in: container)
+            }
             guard !anchorRect.isEmpty else { continue }
 
             let totalHeight = (storage.attribute(.scrollableBlockTotalHeight, at: attrRange.location, effectiveRange: nil) as? CGFloat) ?? image.size.height
