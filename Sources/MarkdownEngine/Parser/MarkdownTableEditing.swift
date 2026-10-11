@@ -145,3 +145,84 @@ extension MarkdownStyler.ParsedTable {
         return Self(header: header, alignments: newAlignments, rows: rows)
     }
 }
+
+// MARK: - Operations on the cell being edited
+
+/// A structural edit offered from the table's context menu, relative to the
+/// cell being edited.
+enum TableOperation: Equatable {
+    case insertRowAbove, insertRowBelow, deleteRow, moveRowUp, moveRowDown
+    case insertColumnLeft, insertColumnRight, deleteColumn, moveColumnLeft, moveColumnRight
+    case align(MarkdownStyler.TableAlignment)
+
+    /// English menu title; also the key into the localized strings.
+    var titleKey: String {
+        switch self {
+        case .insertRowAbove: return "Insert Row Above"
+        case .insertRowBelow: return "Insert Row Below"
+        case .deleteRow: return "Delete Row"
+        case .moveRowUp: return "Move Row Up"
+        case .moveRowDown: return "Move Row Down"
+        case .insertColumnLeft: return "Insert Column Left"
+        case .insertColumnRight: return "Insert Column Right"
+        case .deleteColumn: return "Delete Column"
+        case .moveColumnLeft: return "Move Column Left"
+        case .moveColumnRight: return "Move Column Right"
+        case .align(.left): return "Align Left"
+        case .align(.center): return "Align Center"
+        case .align(.right): return "Align Right"
+        }
+    }
+
+    /// Whether the operation makes sense for the cell at (`row`, `column`).
+    /// The header row can't be removed, moved, or have a row put above it, and
+    /// the last column can't be removed.
+    func isAvailable(row: Int, column: Int, in table: MarkdownStyler.ParsedTable) -> Bool {
+        switch self {
+        case .insertRowAbove: return row >= 1
+        case .insertRowBelow: return true
+        case .deleteRow: return row >= 1
+        case .moveRowUp: return row >= 2
+        case .moveRowDown: return row >= 1 && row < table.rowCount - 1
+        case .insertColumnLeft, .insertColumnRight: return true
+        case .deleteColumn: return table.columnCount > 1
+        case .moveColumnLeft: return column >= 1
+        case .moveColumnRight: return column < table.columnCount - 1
+        case .align(let alignment): return table.alignments[column] != alignment
+        }
+    }
+
+    /// The edited table and where the edited cell ends up, so the caret stays
+    /// on the same content (or the nearest cell when its row/column is removed).
+    func apply(
+        to table: MarkdownStyler.ParsedTable, row: Int, column: Int
+    ) -> (table: MarkdownStyler.ParsedTable, row: Int, column: Int) {
+        guard isAvailable(row: row, column: column, in: table) else { return (table, row, column) }
+        switch self {
+        case .insertRowAbove:
+            return (table.insertingRow(at: row), row + 1, column)
+        case .insertRowBelow:
+            return (table.insertingRow(at: row + 1), row, column)
+        case .deleteRow:
+            let result = table.removingRow(at: row)
+            return (result, min(row, result.rowCount - 1), column)
+        case .moveRowUp:
+            return (table.movingRow(at: row, by: -1), row - 1, column)
+        case .moveRowDown:
+            return (table.movingRow(at: row, by: 1), row + 1, column)
+        case .insertColumnLeft:
+            return (table.insertingColumn(at: column), row, column + 1)
+        case .insertColumnRight:
+            return (table.insertingColumn(at: column + 1), row, column)
+        case .deleteColumn:
+            let result = table.removingColumn(at: column)
+            return (result, row, min(column, result.columnCount - 1))
+        case .moveColumnLeft:
+            return (table.movingColumn(at: column, by: -1), row, column - 1)
+        case .moveColumnRight:
+            return (table.movingColumn(at: column, by: 1), row, column + 1)
+        case .align(let alignment):
+            return (table.settingAlignment(alignment, column: column), row, column)
+        }
+    }
+}

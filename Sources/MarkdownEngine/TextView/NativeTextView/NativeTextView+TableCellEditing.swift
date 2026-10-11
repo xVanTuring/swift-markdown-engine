@@ -114,6 +114,16 @@ final class TableCellEditorView: NSTextView {
         owner?.scheduleTableCellSync()
     }
 
+    /// The cell's row / column operations, above the usual text items.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        let items = owner?.tableOperationMenuItems() ?? []
+        guard !items.isEmpty else { return menu }
+        menu.insertItem(.separator(), at: 0)
+        for item in items.reversed() { menu.insertItem(item, at: 0) }
+        return menu
+    }
+
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
         if resigned {
@@ -207,7 +217,7 @@ extension NativeTextView {
     }
 
     /// The table token starting at `start`, with its parsed form.
-    private func table(startingAt start: Int) -> (token: MarkdownToken, table: MarkdownStyler.ParsedTable)? {
+    func table(startingAt start: Int) -> (token: MarkdownToken, table: MarkdownStyler.ParsedTable)? {
         guard let coordinator = tableCoordinator else { return nil }
         let parsed = coordinator.parsedDocument(for: string)
         guard let token = parsed.tokens.first(where: { $0.kind == .table && $0.range.location == start }) else {
@@ -490,7 +500,7 @@ extension NativeTextView {
         return true
     }
 
-    private func loadTableCell(into session: TableEditSession, from parsed: MarkdownStyler.ParsedTable) {
+    func loadTableCell(into session: TableEditSession, from parsed: MarkdownStyler.ParsedTable) {
         let raw = parsed.cell(row: session.row, column: session.column) ?? ""
         let editor = session.editor
         editor.string = MarkdownStyler.expandCellLineBreaks(raw)
@@ -543,5 +553,92 @@ extension NativeTextView {
             editor.frame = frame
         }
         return true
+    }
+}
+
+// MARK: - Row / column operations and the table menu
+
+/// Carries a `TableOperation` through an `NSMenuItem`.
+final class TableOperationBox: NSObject {
+    let operation: TableOperation
+    init(_ operation: TableOperation) { self.operation = operation }
+}
+
+extension NativeTextView {
+
+    /// Applies a row / column edit relative to the open cell. What the editor
+    /// holds (even if not yet written) is kept, and the editor stays on the
+    /// same content.
+    func applyTableOperation(_ operation: TableOperation) {
+        guard let session = tableEditSession, !session.isFinishing,
+              let (token, current) = table(startingAt: session.tableStart) else { return }
+        session.pendingSync?.cancel()
+        let withCell = current.settingCell(row: session.row, column: session.column, to: session.editor.string)
+        guard operation.isAvailable(row: session.row, column: session.column, in: withCell) else { return }
+        let result = operation.apply(to: withCell, row: session.row, column: session.column)
+
+        suppressTableEntry = true
+        MarkdownLists.performEdit(self, replace: token.range, with: result.table.markdownSource())
+        suppressTableEntry = false
+
+        session.row = result.row
+        session.column = result.column
+        guard let (_, fresh) = table(startingAt: session.tableStart) else {
+            endTableCellEditing()
+            return
+        }
+        loadTableCell(into: session, from: fresh)
+        layoutTableCellEditor()
+        session.editor.setSelectedRange(NSRange(location: (session.editor.string as NSString).length, length: 0))
+    }
+
+    /// The table items for the open cell; empty when no cell is open.
+    func tableOperationMenuItems() -> [NSMenuItem] {
+        guard let session = tableEditSession,
+              let (_, parsed) = table(startingAt: session.tableStart),
+              session.row < parsed.rowCount, session.column < parsed.columnCount else { return [] }
+
+        let groups: [[TableOperation]] = [
+            [.insertRowAbove, .insertRowBelow, .moveRowUp, .moveRowDown, .deleteRow],
+            [.insertColumnLeft, .insertColumnRight, .moveColumnLeft, .moveColumnRight, .deleteColumn],
+            [.align(.left), .align(.center), .align(.right)],
+        ]
+        var items: [NSMenuItem] = []
+        for group in groups {
+            if !items.isEmpty { items.append(.separator()) }
+            for operation in group {
+                let item = NSMenuItem(
+                    title: NSLocalizedString(operation.titleKey, bundle: .module, comment: ""),
+                    action: #selector(performTableMenuOperation(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = TableOperationBox(operation)
+                item.isEnabled = operation.isAvailable(row: session.row, column: session.column, in: parsed)
+                if case .align(let alignment) = operation {
+                    item.state = parsed.alignments[session.column] == alignment ? .on : .off
+                    item.isEnabled = true
+                }
+                items.append(item)
+            }
+        }
+        return items
+    }
+
+    @objc func performTableMenuOperation(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? TableOperationBox else { return }
+        applyTableOperation(box.operation)
+    }
+
+    /// Right-click on a table's image opens the cell under the pointer and
+    /// shows its menu.
+    override func rightMouseDown(with event: NSEvent) {
+        if beginTableCellEditingIfHit(event: event),
+           let editor = tableEditSession?.editor,
+           let menu = editor.menu(for: event) {
+            NSMenu.popUpContextMenu(menu, with: event, for: editor)
+            return
+        }
+        super.rightMouseDown(with: event)
     }
 }

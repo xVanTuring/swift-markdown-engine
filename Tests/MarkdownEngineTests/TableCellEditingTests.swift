@@ -81,6 +81,162 @@ struct TableCellEditingTests {
         #expect(!tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
     }
 
+    // MARK: Row / column operations in the editor
+
+    private static let wide = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |"
+
+    @Test func insertRowBelowAddsARowAndKeepsTheCell() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        tv.applyTableOperation(.insertRowBelow)
+        #expect(tv.string == "| A | B |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n| 3 | 4 |\n")
+        #expect(tv.tableEditSession?.row == 1)
+        #expect(tv.tableEditSession?.editor.string == "1")
+    }
+
+    @Test func textTypedButNotYetWrittenSurvivesAnOperation() {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
+        tv.tableEditSession?.editor.string = "typed"
+        tv.applyTableOperation(.insertColumnLeft)
+        #expect(tv.string.contains("| 1 |  | typed |"))
+        #expect(tv.tableEditSession?.column == 2)
+        #expect(tv.tableEditSession?.editor.string == "typed")
+    }
+
+    @Test func deleteRowRemovesItAndMovesTheEditor() {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        tv.applyTableOperation(.deleteRow)
+        #expect(!tv.string.contains("| 1 | 2 |"))
+        #expect(tv.string.contains("| 3 | 4 |"))
+        #expect(tv.tableEditSession?.editor.string == "3")
+    }
+
+    @Test func deleteColumnRemovesItFromEveryRow() {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        tv.applyTableOperation(.deleteColumn)
+        #expect(tv.string == "| B |\n| --- |\n| 2 |\n| 4 |\n")
+    }
+
+    @Test func movingARowReordersTheSource() {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 2, column: 0))
+        tv.applyTableOperation(.moveRowUp)
+        #expect(tv.string == "| A | B |\n| --- | --- |\n| 3 | 4 |\n| 1 | 2 |\n")
+        #expect(tv.tableEditSession?.row == 1)
+        #expect(tv.tableEditSession?.editor.string == "3")
+    }
+
+    @Test func alignmentChangesTheDelimiterRowAndTheEditor() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
+        tv.applyTableOperation(.align(.right))
+        #expect(tv.string.contains("| --- | ---: |"))
+        #expect(try #require(tv.tableEditSession?.editor).alignment == .right)
+    }
+
+    @Test func anUnavailableOperationLeavesTheDocumentAlone() {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 0, column: 0))
+        tv.applyTableOperation(.deleteRow)               // the header can't go
+        #expect(tv.string == Self.wide + "\n")
+    }
+
+    @Test func anOperationIsOneUndoStep() {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        tv.allowsUndo = true
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        tv.applyTableOperation(.insertRowBelow)
+        tv.endTableCellEditing()
+        tv.undoManager?.undo()
+        #expect(tv.string == Self.wide + "\n")
+    }
+
+    // MARK: The menu
+
+    @Test func theMenuListsEveryOperationWithSeparatorsBetweenGroups() {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let items = tv.tableOperationMenuItems()
+        #expect(items.filter { !$0.isSeparatorItem }.count == 13)
+        #expect(items.filter(\.isSeparatorItem).count == 2)
+        #expect(!items.contains { $0.title.isEmpty && !$0.isSeparatorItem })
+    }
+
+    @Test func theMenuIsEmptyWhenNoCellIsOpen() {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.tableOperationMenuItems().isEmpty)
+    }
+
+    @Test func menuItemsAreDisabledWhereTheOperationDoesNotApply() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 0, column: 0))   // header, first column
+        let items = tv.tableOperationMenuItems()
+        func item(_ operation: TableOperation) throws -> NSMenuItem {
+            try #require(items.first {
+                ($0.representedObject as? TableOperationBox)?.operation == operation
+            })
+        }
+        #expect(try !item(.deleteRow).isEnabled)
+        #expect(try !item(.insertRowAbove).isEnabled)
+        #expect(try !item(.moveColumnLeft).isEnabled)
+        #expect(try item(.insertRowBelow).isEnabled)
+        #expect(try item(.moveColumnRight).isEnabled)
+    }
+
+    @Test func theCurrentAlignmentIsChecked() throws {
+        let (tv, coordinator) = makeEditor("| A | B |\n|---|--:|\n| 1 | 2 |\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
+        let items = tv.tableOperationMenuItems()
+        let checked = items.filter { $0.state == .on }
+        #expect(checked.count == 1)
+        #expect((checked[0].representedObject as? TableOperationBox)?.operation == .align(.right))
+    }
+
+    @Test func choosingAMenuItemRunsItsOperation() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let items = tv.tableOperationMenuItems()
+        let insert = try #require(items.first {
+            ($0.representedObject as? TableOperationBox)?.operation == .insertRowBelow
+        })
+        tv.performTableMenuOperation(insert)
+        #expect(tv.string.contains("|  |  |"))
+    }
+
+    @Test func theEditorsOwnMenuCarriesTheTableItemsFirst() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        let event = try #require(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let menu = try #require(editor.menu(for: event))
+        #expect((menu.items.first?.representedObject as? TableOperationBox)?.operation == .insertRowAbove)
+        #expect(menu.items.count > 14)                    // table items + separator + text items
+    }
+
+    // MARK: Menu text
+
+    @Test func everyMenuTitleHasATranslation() throws {
+        let operations: [TableOperation] = [
+            .insertRowAbove, .insertRowBelow, .deleteRow, .moveRowUp, .moveRowDown,
+            .insertColumnLeft, .insertColumnRight, .deleteColumn, .moveColumnLeft, .moveColumnRight,
+            .align(.left), .align(.center), .align(.right),
+        ]
+        let chinese = try #require(Bundle.module.path(forResource: "zh-Hans", ofType: "lproj").flatMap(Bundle.init(path:)))
+        let english = try #require(Bundle.module.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:)))
+        for operation in operations {
+            let key = operation.titleKey
+            let zh = chinese.localizedString(forKey: key, value: "⟂missing", table: nil)
+            let en = english.localizedString(forKey: key, value: "⟂missing", table: nil)
+            #expect(zh != "⟂missing" && zh != key, "no Chinese for \(key)")
+            #expect(en == key)
+        }
+    }
+
     // MARK: The switch
 
     @Test func switchingItOffWhileACellIsOpenCommitsAndCloses() {
