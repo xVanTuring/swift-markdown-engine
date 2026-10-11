@@ -445,7 +445,7 @@ extension NativeTextView {
     // MARK: Document writes
 
     /// How long typing pauses before the cell is written to the document.
-    private static let tableCellSyncDelay: TimeInterval = 0.25
+    private static let tableCellSyncDelay: TimeInterval = 0.05
 
     /// Writes the cell to the document shortly after typing pauses, so the
     /// table re-renders and its row grows with the text instead of the editor

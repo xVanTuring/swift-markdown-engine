@@ -52,8 +52,9 @@ struct MarkdownTableEditingTests {
     @Test("a line break becomes <br>")
     func lineBreak() {
         #expect(MarkdownStyler.ParsedTable.encodeCell("one\ntwo") == "one<br>two")
-        #expect(MarkdownStyler.ParsedTable.encodeCell("one\n\ntwo") == "one<br>two")
-        #expect(MarkdownStyler.ParsedTable.encodeCell("\nedge\n") == "edge")
+        #expect(MarkdownStyler.ParsedTable.encodeCell("one\n\ntwo") == "one<br><br>two")
+        #expect(MarkdownStyler.ParsedTable.encodeCell("\nedge\n") == "<br>edge<br>")
+        #expect(MarkdownStyler.ParsedTable.encodeCell("  pad  ") == "pad")
     }
 
     @Test("setting a header or body cell")
