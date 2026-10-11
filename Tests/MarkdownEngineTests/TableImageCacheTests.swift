@@ -157,4 +157,52 @@ struct TableImageCacheTests {
 
         #expect(redRender.rendered)
     }
+
+    // MARK: - Cell geometry
+
+    @Test func renderedImageCarriesCellGeometry() throws {
+        let source = "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |"
+        let parsed = try #require(MarkdownStyler.parseTableSource(source))
+        let aqua = try #require(NSAppearance(named: .aqua))
+        let image = MarkdownStyler.tableImage(
+            for: source, parsed: parsed, ctx: makeContext(for: source),
+            appearance: aqua, availableWidth: 2000).image
+        let geometry = try #require(image.tableGeometry)
+        #expect(geometry.rowCount == 3)
+        #expect(geometry.columnCount == 2)
+
+        // Every cell's centre maps back to that cell, and the cells tile the image.
+        for row in 0..<3 {
+            for column in 0..<2 {
+                let rect = try #require(geometry.cellRect(row: row, column: column))
+                let hit = geometry.cell(at: CGPoint(x: rect.midX, y: rect.midY))
+                #expect(hit?.row == row && hit?.column == column)
+            }
+        }
+        let last = try #require(geometry.cellRect(row: 2, column: 1))
+        #expect(last.maxX < image.size.width)
+        #expect(last.maxY < image.size.height)
+    }
+
+    @Test func cachedImageKeepsItsGeometry() throws {
+        let source = "| x | y |\n|---|---|\n| 1 | 2 |"
+        let parsed = try #require(MarkdownStyler.parseTableSource(source))
+        let ctx = makeContext(for: source)
+        let aqua = try #require(NSAppearance(named: .aqua))
+        _ = MarkdownStyler.tableImage(for: source, parsed: parsed, ctx: ctx, appearance: aqua, availableWidth: 2000)
+        let cached = MarkdownStyler.tableImage(for: source, parsed: parsed, ctx: ctx, appearance: aqua, availableWidth: 2000)
+        #expect(!cached.rendered)
+        #expect(cached.image.tableGeometry?.columnCount == 2)
+    }
+
+    @Test func hitTestRejectsPointsOutsideTheTable() {
+        let geometry = TableGeometry(
+            columnLeft: [1, 50, 100], rowTop: [1, 30, 60], borderWidth: 1,
+            imageSize: CGSize(width: 101, height: 61))
+        #expect(geometry.cell(at: CGPoint(x: -5, y: 10)) == nil)
+        #expect(geometry.cell(at: CGPoint(x: 10, y: 200)) == nil)
+        // A click on the separator belongs to the cell before it.
+        #expect(geometry.cell(at: CGPoint(x: 49.5, y: 10))?.column == 0)
+        #expect(geometry.cell(at: CGPoint(x: 75, y: 45))?.row == 1)
+    }
 }
