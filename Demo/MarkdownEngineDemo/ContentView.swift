@@ -25,6 +25,7 @@ struct ContentView: View {
     // Engine modes, flipped live from the toolbar.
     @State private var isReadOnly = false
     @State private var showRawSource = false
+    @State private var editsTablesInPlace = true
     @State private var useReadingColumn = false
 
     /// Registers/unregisters BOTH opt-in seams at once. The document is written
@@ -89,6 +90,11 @@ struct ContentView: View {
                     Label("Raw source", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
                 .help("Raw markdown source: no styling, no syntax hiding")
+
+                Toggle(isOn: $editsTablesInPlace) {
+                    Label("Edit tables in place", systemImage: "tablecells")
+                }
+                .help("Click a table cell to edit it in place; off shows the table's Markdown source while the caret is inside")
 
                 Toggle(isOn: $useReadingColumn) {
                     Label("Reading column", systemImage: "arrow.right.and.line.vertical.and.arrow.left")
@@ -293,6 +299,7 @@ struct ContentView: View {
 
         // Toolbar-driven modes.
         config.rawSourceMode = showRawSource
+        config.editsTablesInPlace = editsTablesInPlace
         config.readingWidth = useReadingColumn ? 620 : nil
 
         return config

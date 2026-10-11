@@ -40,6 +40,11 @@ final class NativeTextView: NSTextView {
             overscrollPercent = configuration.overscroll.percent
             maxOverscrollPoints = configuration.overscroll.maxPoints
             minOverscrollPoints = configuration.overscroll.minPoints
+            // Switching in-place table editing off (or raw mode on) while a
+            // cell is open commits it and closes the editor.
+            if tableEditSession != nil, !canEditTablesInPlace {
+                endTableCellEditing()
+            }
         }
     }
     var overscrollPercent: CGFloat = MarkdownEditorConfiguration.default.overscroll.percent
