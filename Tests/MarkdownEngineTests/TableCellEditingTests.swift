@@ -92,6 +92,18 @@ struct TableCellEditingTests {
         #expect(session.editor.frame.width > 0)
     }
 
+    /// The text view's own `font` is a hidden-marker size; the editor must use
+    /// the body font or its text is laid out at a fraction of a point.
+    @Test func theEditorUsesTheBodyFont() throws {
+        let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        #expect((editor.font?.pointSize ?? 0) >= 10)
+        let layout = try #require(editor.layoutManager)
+        let container = try #require(editor.textContainer)
+        #expect(layout.usedRect(for: container).height > 5)
+    }
+
     @Test func aLineBreakCellOpensWithARealNewline() throws {
         let (tv, _) = makeEditor("| a | b |\n|---|---|\n| one<br>two | 2 |\n")
         #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
