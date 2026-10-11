@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `NativeTextViewWrapper(parkingKey:)` keeps the editor when the embedder removes it from the hierarchy (routing to another screen) and hands the same text view, undo stacks and scroll position to the next editor created with that key, whatever document it opens. AppKit's undo actions belong to the text view instance, so this is what keeps ⌘Z across a route away and back. One editor per key; the text and link bindings are reconnected to the new view. Off by default.
 - `NativeTextViewWrapper.fileDrop` (`EditorFileDrop`) takes files dragged onto the text. Per drop the embedder decides: insert Markdown where the files land (AppKit's insertion point shows while dragging, and the text lands on lines of its own as one undo step), hand the files off to itself, or refuse. Over an image, a formula or a table the drop goes above or below all of it, by the half the pointer is in, so its source is never cut, however many lines it spans. A file still to be written (a promise from Photos, Mail or a browser, or a browser's bare image data, named after its address) is written to a temporary folder on drop and goes the same way. Over the margins beside the column and over the header band the drag goes to the text too; the header's own views never take it (an editing title's field editor typed a dropped file's path into it). Links go in as `[[Name]]` with their id beside the text (in raw source mode as stored, id and all). Without it the text view keeps AppKit's own drag handling.
+- **In-place table editing**: a rendered GFM table stays rendered while you edit. Click a cell to edit its raw Markdown (inline formatting included) in an overlay editor; leaving the cell writes the change back as one undoable edit. Return inserts a line break (`<br>`) and the row grows with it; Tab / Shift-Tab / arrow keys move between cells; Esc leaves. Turn it off with `MarkdownEditorConfiguration.editsTablesInPlace` (default `true`).
+- Right-click menu on a table: insert, delete and move rows and columns, and set column alignment. Titles are localized (en, zh-Hans).
+- `ListStyle.autoSpaceTaskCheckbox` (default `true`): typing `- []` becomes `- [ ] ` with the caret after the space.
 
 ### Fixed
 - An image pasted with ⌘V goes in as `![[Name]]` with its id beside the text, like a link inserted any other way; with its source showing, the `|<id>` used to show.
@@ -90,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `convert(_:to:)` instead.
 
 ### Fixed
+- Tables no longer overlap the text below them after the window edge is dragged several times; the table layout is refreshed once the text container catches up with the new width.
 - Switching documents drops AppKit's blue autocorrection underline; it stood over the incoming document, and its range moved into the new text.
 - A configured bottom safe-area inset (`safeAreaInsets.bottom`) survives `recalcOverscroll`; it was reset to 0 on every pass, so the gap left for a control above the editor went missing.
 - Smart paste keeps tables, lists and headings that arrive wrapped in elements the converter doesn't know (Gemini's `<response-element>`/`<table-block>` web components, `<section>`, a Google Docs `<b>` wrapper); they used to collapse into one line of text.
