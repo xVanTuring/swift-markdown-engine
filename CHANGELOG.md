@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **In-place table editing**: a rendered GFM table stays rendered while you edit. Click a cell to edit its raw Markdown (inline formatting included) in an overlay editor; leaving the cell writes the change back as one undoable edit. Return inserts a line break (`<br>`) and the row grows with it; Tab / Shift-Tab / arrow keys move between cells; Esc leaves. Turn it off with `MarkdownEditorConfiguration.editsTablesInPlace` (default `true`).
+- Right-click menu on a table: insert, delete and move rows and columns, and set column alignment. Titles are localized (en, zh-Hans).
+- `ListStyle.autoSpaceTaskCheckbox` (default `true`): typing `- []` becomes `- [ ] ` with the caret after the space.
+
 ### Fixed
+- Tables no longer overlap the text below them after the window edge is dragged several times; the table layout is refreshed once the text container catches up with the new width.
 - Switching documents drops AppKit's blue autocorrection underline; it stood over the incoming document, and its range moved into the new text.
 - Smart paste keeps tables, lists and headings that arrive wrapped in elements the converter doesn't know (Gemini's `<response-element>`/`<table-block>` web components, `<section>`, a Google Docs `<b>` wrapper); they used to collapse into one line of text.
 

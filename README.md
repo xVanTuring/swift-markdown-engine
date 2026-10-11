@@ -25,6 +25,9 @@ checkboxes.
 ## Features
 
 - **Live Markdown styling** — bold, italic, headings, lists, blockquotes, GFM tables, code, links, task checkboxes, horizontal rules
+- **In-place table editing** — click a cell of a rendered table to edit its
+  Markdown; Tab/arrows navigate, Return adds a line break, right-click for
+  row / column operations and alignment (`editsTablesInPlace`)
 - **Wiki-style linking** with two-form storage / display roundtripping
   (`[[Name|<id>]]` ↔ `[[Name]]`)
 - **Image embeds** — both `![[Name]]` (Obsidian-style, embedder supplies the                           
@@ -202,6 +205,7 @@ configuration.codeBlock.fontSizeScale = 0.9
 configuration.headings.fontMultipliers = [2.4, 1.8, 1.4, 1.1, 0.9, 0.75]
 configuration.overscroll.percent = 0.4
 configuration.lists.helpersEnabled = false
+configuration.editsTablesInPlace = false   // edit tables as raw Markdown instead
 configuration.safeAreaInsets = SafeAreaInsets(top: 56)   // headroom under a translucent toolbar
 ```
 
