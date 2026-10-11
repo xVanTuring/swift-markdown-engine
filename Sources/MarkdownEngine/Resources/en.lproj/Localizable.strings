@@ -1,0 +1,14 @@
+/* Table editing context menu */
+"Insert Row Above" = "Insert Row Above";
+"Insert Row Below" = "Insert Row Below";
+"Delete Row" = "Delete Row";
+"Move Row Up" = "Move Row Up";
+"Move Row Down" = "Move Row Down";
+"Insert Column Left" = "Insert Column Left";
+"Insert Column Right" = "Insert Column Right";
+"Delete Column" = "Delete Column";
+"Move Column Left" = "Move Column Left";
+"Move Column Right" = "Move Column Right";
+"Align Left" = "Align Left";
+"Align Center" = "Align Center";
+"Align Right" = "Align Right";

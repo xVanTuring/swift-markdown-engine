@@ -16,6 +16,7 @@ import PackageDescription
 // `MarkdownEngine` library stays free of them at link time.
 let package = Package(
     name: "MarkdownEngine",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "MarkdownEngine", targets: ["MarkdownEngine"]),
@@ -26,7 +27,10 @@ let package = Package(
         .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.7.0"),
     ],
     targets: [
-        .target(name: "MarkdownEngine"),
+        .target(
+            name: "MarkdownEngine",
+            resources: [.process("Resources")]
+        ),
         .target(
             name: "MarkdownEngineCodeBlocks",
             dependencies: ["MarkdownEngine"],

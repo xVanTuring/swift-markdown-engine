@@ -175,6 +175,27 @@ final class WideTableImageView: NSImageView {
         textView.window?.makeFirstResponder(textView)
         textView.setSelectedRange(NSRange(location: location, length: 0))
     }
+
+    /// Right-click opens the cell under the pointer and shows its row / column menu.
+    override func rightMouseDown(with event: NSEvent) {
+        guard let overlay = ownerOverlay, let textView = overlay.ownerTextView,
+              textView.canEditTablesInPlace,
+              let geometry = image?.tableGeometry,
+              let token = textView.tableToken(containing: overlay.anchorTextLocation) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        let local = convert(event.locationInWindow, from: nil)
+        let imagePoint = CGPoint(x: local.x, y: bounds.height - local.y)
+        guard let cell = geometry.cell(at: imagePoint),
+              textView.beginTableCellEditing(tableStart: token.range.location, row: cell.row, column: cell.column),
+              let editor = textView.tableEditSession?.editor,
+              let menu = editor.menu(for: event) else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: editor)
+    }
 }
 
 // MARK: - NativeTextView reconcile extension
