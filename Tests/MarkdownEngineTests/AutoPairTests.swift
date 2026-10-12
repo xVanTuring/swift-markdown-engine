@@ -92,7 +92,7 @@ struct AutoPairTests {
 
     @Test("an opener over a selection wraps it and keeps it selected", arguments: [
         ("(", ")"), ("[", "]"), ("{", "}"), ("=", "="),
-        ("*", "*"), ("_", "_"), ("~", "~"), ("`", "`"), ("$", "$"),
+        ("*", "*"), ("_", "_"), ("~", "~"), ("`", "`"), ("$", "$"), ("\"", "\""), ("'", "'"),
     ])
     func wraps(open: String, close: String) {
         let r = type(open, in: "a word b", selection: NSRange(location: 2, length: 4))

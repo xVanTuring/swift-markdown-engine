@@ -38,8 +38,8 @@ struct QuoteSubstitutionPolicyTests {
         tv.setSelectedRange(NSRange(location: r.location + 1, length: 0))
     }
 
-    @Test func defaultPolicyKeepsSmartQuotesOn() {
-        #expect(SpellCheckingPolicy.default.automaticQuoteSubstitution == true)
+    @Test func defaultPolicyKeepsSmartQuotesOff() {
+        #expect(SpellCheckingPolicy.default.automaticQuoteSubstitution == false)
     }
 
     // Leaving a suppress zone used to force smart quotes back on regardless of policy.

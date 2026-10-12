@@ -96,7 +96,7 @@ struct MarkdownLists {
     /// Openers that wrap a selection, with the closer each one adds.
     private static let wrapClosers: [String: String] = [
         "(": ")", "[": "]", "{": "}",
-        "=": "=", "*": "*", "_": "_", "~": "~", "`": "`", "$": "$",
+        "=": "=", "*": "*", "_": "_", "~": "~", "`": "`", "$": "$", "\"": "\"", "'": "'",
     ]
     /// The bracket openers; the other wrappers are Markdown markers, which
     /// are not applied inside code (a backtick is exempt: the span it just
