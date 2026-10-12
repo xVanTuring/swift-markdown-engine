@@ -30,6 +30,16 @@ extension MarkdownStyler {
 
             if isActive {
                 appendSecondaryMarkers(for: token, to: &attrs, theme: ctx.configuration.theme)
+                let style = ctx.configuration.blockLatex
+                if style.showsPreviewWhileEditing, !latexContent.isEmpty,
+                   let entry = ctx.services.latex.render(
+                       latex: latexContent,
+                       mode: .display,
+                       fontSize: latexFontSize,
+                       theme: ctx.configuration.theme
+                   ) {
+                    appendLivePreview(for: token, entry: entry, style: style, ctx: ctx, attrs: &attrs)
+                }
             } else if !latexContent.isEmpty,
                       let entry = ctx.services.latex.render(
                           latex: latexContent,
@@ -59,6 +69,47 @@ extension MarkdownStyler {
             }
         }
         return attrs
+    }
+
+    /// Source stays visible; the rendered formula is drawn in the space reserved
+    /// below the LAST source line. A multi-line block spans several paragraphs
+    /// and each paragraph's fragment would draw the image, so only the last one
+    /// carries it (and the bottom spacing); the first carries the top spacing.
+    private static func appendLivePreview(
+        for token: MarkdownToken,
+        entry: LatexRenderResult,
+        style: BlockLatexStyle,
+        ctx: StylingContext,
+        attrs: inout [StyledRange]
+    ) {
+        guard let paraRange = token.standaloneParagraphRange(in: ctx.nsText) else { return }
+        var paragraphs: [(content: NSRange, full: NSRange)] = []
+        ctx.nsText.enumerateSubstrings(in: paraRange, options: .byParagraphs) { _, content, full, _ in
+            paragraphs.append((content, full))
+        }
+        guard let last = paragraphs.last, last.content.length > 0 else { return }
+
+        let baseLineHeight = layoutBridgeDefaultLineHeight(for: ctx.baseFont, using: ctx.layoutBridge)
+        let imageBounds = CGRect(x: 0, y: entry.baselineOffset, width: entry.size.width, height: entry.size.height)
+
+        for (i, p) in paragraphs.enumerated() {
+            let para = NSMutableParagraphStyle()
+            para.minimumLineHeight = baseLineHeight
+            para.maximumLineHeight = baseLineHeight
+            if i == 0 { para.paragraphSpacingBefore = style.paragraphSpacingBefore }
+            if i == paragraphs.count - 1 {
+                para.paragraphSpacing = entry.size.height + style.previewGap + style.paragraphSpacing
+            }
+            attrs.append((p.full, [.paragraphStyle: para]))
+        }
+        var previewAttrs: [NSAttributedString.Key: Any] = [
+            .latexImage: entry.image,
+            .latexBounds: NSValue(rect: imageBounds),
+            .latexIsBlock: true,
+            .latexBlockOffsetY: baseLineHeight + style.previewGap
+        ]
+        if style.centersPreview { previewAttrs[.latexBlockCentered] = true }
+        attrs.append((last.content, previewAttrs))
     }
 
     // MARK: Inline LaTeX $formula$

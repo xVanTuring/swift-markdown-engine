@@ -18,6 +18,8 @@ extension NSAttributedString.Key {
     static let latexBounds = NSAttributedString.Key("LatexImageBounds")
     static let latexIsBlock = NSAttributedString.Key("LatexIsBlock")
     static let latexBlockOffsetY = NSAttributedString.Key("LatexBlockOffsetY")
+    /// Bool — a block image drawn centered in the text container instead of at the start of its source.
+    static let latexBlockCentered = NSAttributedString.Key("LatexBlockCentered")
     static let thematicBreak = NSAttributedString.Key("ThematicBreak")
     /// String — the mark to draw CENTERED in place of the full-width rule on a
     /// line that already carries `.thematicBreak`. Absent means the rule. The
@@ -440,7 +442,13 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         } else {
             yPosition = firstLineMinY + (lineHeight - imageBounds.height) / 2
         }
-        return CGRect(x: pos.x, y: yPosition,
+        var x = pos.x
+        if textStorage?.attribute(.latexBlockCentered, at: attrRange.location, effectiveRange: nil) as? Bool == true,
+           let containerWidth = textLayoutManager?.textContainer?.size.width {
+            let containerX = point.x - layoutFragmentFrame.origin.x
+            x = containerX + (containerWidth - imageBounds.width) / 2
+        }
+        return CGRect(x: x, y: yPosition,
                        width: imageBounds.width, height: imageBounds.height)
     }
 

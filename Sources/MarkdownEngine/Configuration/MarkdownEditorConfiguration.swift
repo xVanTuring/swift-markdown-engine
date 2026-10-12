@@ -567,15 +567,31 @@ public struct BlockLatexStyle: Sendable {
     public var paragraphSpacing: CGFloat
     /// Extra bottom padding added to single-letter formulas to avoid clipping.
     public var singleLetterPaddingBottom: CGFloat
+    /// While the caret is inside a `$$...$$` block, keep its source visible and
+    /// draw the rendered formula below it, so the two can be compared as you
+    /// type. When `false`, only the source shows until the caret leaves.
+    /// A formula that doesn't render yet (mid-typing) shows source only.
+    public var showsPreviewWhileEditing: Bool
+    /// Gap between the source and the live preview below it.
+    public var previewGap: CGFloat
+    /// Center the live preview in the text column. When `false` (default) it
+    /// sits left-aligned under the source.
+    public var centersPreview: Bool
 
     public init(
         paragraphSpacingBefore: CGFloat = 16,
         paragraphSpacing: CGFloat = 20,
-        singleLetterPaddingBottom: CGFloat = 1.0
+        singleLetterPaddingBottom: CGFloat = 1.0,
+        showsPreviewWhileEditing: Bool = true,
+        previewGap: CGFloat = 8,
+        centersPreview: Bool = false
     ) {
+        self.centersPreview = centersPreview
         self.paragraphSpacingBefore = paragraphSpacingBefore
         self.paragraphSpacing = paragraphSpacing
         self.singleLetterPaddingBottom = singleLetterPaddingBottom
+        self.showsPreviewWhileEditing = showsPreviewWhileEditing
+        self.previewGap = previewGap
     }
 
     public static let `default` = BlockLatexStyle()
