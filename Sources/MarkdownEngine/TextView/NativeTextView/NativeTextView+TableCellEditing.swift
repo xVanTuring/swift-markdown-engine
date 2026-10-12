@@ -114,14 +114,13 @@ final class TableCellEditorView: NSTextView {
         owner?.scheduleTableCellSync()
     }
 
-    /// The cell's row / column operations, above the usual text items.
+    /// The host's table items for the open cell, on top of the editor's own
+    /// text menu. The engine ships no items of its own — see the seam in
+    /// `TableCellMenu.swift`.
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event) ?? NSMenu()
-        let items = owner?.tableOperationMenuItems() ?? []
-        guard !items.isEmpty else { return menu }
-        menu.insertItem(.separator(), at: 0)
-        for item in items.reversed() { menu.insertItem(item, at: 0) }
-        return menu
+        guard let owner else { return menu }
+        return owner.tableCellContextMenu(menu)
     }
 
     override func resignFirstResponder() -> Bool {
@@ -577,12 +576,6 @@ extension NativeTextView {
 
 // MARK: - Row / column operations and the table menu
 
-/// Carries a `TableOperation` through an `NSMenuItem`.
-final class TableOperationBox: NSObject {
-    let operation: TableOperation
-    init(_ operation: TableOperation) { self.operation = operation }
-}
-
 extension NativeTextView {
 
     /// Applies a row / column edit relative to the open cell. What the editor
@@ -611,42 +604,32 @@ extension NativeTextView {
         session.editor.setSelectedRange(NSRange(location: (session.editor.string as NSString).length, length: 0))
     }
 
-    /// The table items for the open cell; empty when no cell is open.
-    func tableOperationMenuItems() -> [NSMenuItem] {
-        guard let session = tableEditSession,
-              let (_, parsed) = table(startingAt: session.tableStart),
-              session.row < parsed.rowCount, session.column < parsed.columnCount else { return [] }
-
-        let groups: [[TableOperation]] = [
-            [.insertRowAbove, .insertRowBelow, .moveRowUp, .moveRowDown, .deleteRow],
-            [.insertColumnLeft, .insertColumnRight, .moveColumnLeft, .moveColumnRight, .deleteColumn],
-            [.align(.left), .align(.center), .align(.right)],
-        ]
-        var items: [NSMenuItem] = []
-        for group in groups {
-            if !items.isEmpty { items.append(.separator()) }
-            for operation in group {
-                let item = NSMenuItem(
-                    title: NSLocalizedString(operation.titleKey, bundle: .module, comment: ""),
-                    action: #selector(performTableMenuOperation(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
-                item.representedObject = TableOperationBox(operation)
-                item.isEnabled = operation.isAvailable(row: session.row, column: session.column, in: parsed)
-                if case .align(let alignment) = operation {
-                    item.state = parsed.alignments[session.column] == alignment ? .on : .off
-                    item.isEnabled = true
-                }
-                items.append(item)
-            }
-        }
-        return items
+    /// The menu to pop up in the cell editor: the editor's own menu, handed to
+    /// the host's ``NativeTextViewWrapper/onTableCellContextMenu`` hook along
+    /// with everything it needs to build the table items. Without a hook — the
+    /// default — the menu comes back untouched.
+    func tableCellContextMenu(_ menu: NSMenu) -> NSMenu {
+        guard let hook = tableCoordinator?.onTableCellContextMenu,
+              let context = tableCellMenuContext() else { return menu }
+        return hook(menu, context)
     }
 
-    @objc func performTableMenuOperation(_ sender: NSMenuItem) {
-        guard let box = sender.representedObject as? TableOperationBox else { return }
-        applyTableOperation(box.operation)
+    /// What the host's menu needs about the open cell; nil when no cell is open
+    /// or its row / column no longer resolves inside the table.
+    func tableCellMenuContext() -> TableCellMenuContext? {
+        guard let session = tableEditSession,
+              let (_, parsed) = table(startingAt: session.tableStart),
+              session.row < parsed.rowCount, session.column < parsed.columnCount else { return nil }
+        return TableCellMenuContext(
+            row: session.row,
+            column: session.column,
+            rowCount: parsed.rowCount,
+            columnCount: parsed.columnCount,
+            alignment: TableEditAlignment(parsed.alignments[session.column]),
+            perform: { [weak self] operation in
+                self?.applyTableOperation(operation.operation)
+            }
+        )
     }
 
     /// Right-click on a table's image opens the cell under the pointer and

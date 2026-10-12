@@ -148,47 +148,41 @@ extension MarkdownStyler.ParsedTable {
 
 // MARK: - Operations on the cell being edited
 
-/// A structural edit offered from the table's context menu, relative to the
-/// cell being edited.
+/// A structural edit on the cell being edited. It is the engine's internal
+/// model; ``TableEditOperation`` is the public face the host's menu uses.
 enum TableOperation: Equatable {
     case insertRowAbove, insertRowBelow, deleteRow, moveRowUp, moveRowDown
     case insertColumnLeft, insertColumnRight, deleteColumn, moveColumnLeft, moveColumnRight
     case align(MarkdownStyler.TableAlignment)
 
-    /// English menu title; also the key into the localized strings.
-    var titleKey: String {
-        switch self {
-        case .insertRowAbove: return "Insert Row Above"
-        case .insertRowBelow: return "Insert Row Below"
-        case .deleteRow: return "Delete Row"
-        case .moveRowUp: return "Move Row Up"
-        case .moveRowDown: return "Move Row Down"
-        case .insertColumnLeft: return "Insert Column Left"
-        case .insertColumnRight: return "Insert Column Right"
-        case .deleteColumn: return "Delete Column"
-        case .moveColumnLeft: return "Move Column Left"
-        case .moveColumnRight: return "Move Column Right"
-        case .align(.left): return "Align Left"
-        case .align(.center): return "Align Center"
-        case .align(.right): return "Align Right"
-        }
+    /// Whether the operation makes sense for the cell at (`row`, `column`).
+    /// The header row can't be removed, moved, or have a row put above it, the
+    /// first body row can't move up into the header, and the last column can't
+    /// be removed or moved right.
+    func isAvailable(row: Int, column: Int, in table: MarkdownStyler.ParsedTable) -> Bool {
+        guard column >= 0, column < table.columnCount else { return false }
+        return isAvailable(row: row, column: column, rowCount: table.rowCount,
+                           columnCount: table.columnCount, alignment: table.alignments[column])
     }
 
-    /// Whether the operation makes sense for the cell at (`row`, `column`).
-    /// The header row can't be removed, moved, or have a row put above it, and
-    /// the last column can't be removed.
-    func isAvailable(row: Int, column: Int, in table: MarkdownStyler.ParsedTable) -> Bool {
+    /// The same rule expressed in the table's shape rather than the table
+    /// itself, so ``TableCellMenuContext/isEnabled(_:)`` — which knows only the
+    /// counts and the open column's alignment — reaches the single copy of it.
+    func isAvailable(
+        row: Int, column: Int, rowCount: Int, columnCount: Int,
+        alignment: MarkdownStyler.TableAlignment
+    ) -> Bool {
         switch self {
         case .insertRowAbove: return row >= 1
         case .insertRowBelow: return true
         case .deleteRow: return row >= 1
         case .moveRowUp: return row >= 2
-        case .moveRowDown: return row >= 1 && row < table.rowCount - 1
+        case .moveRowDown: return row >= 1 && row < rowCount - 1
         case .insertColumnLeft, .insertColumnRight: return true
-        case .deleteColumn: return table.columnCount > 1
+        case .deleteColumn: return columnCount > 1
         case .moveColumnLeft: return column >= 1
-        case .moveColumnRight: return column < table.columnCount - 1
-        case .align(let alignment): return table.alignments[column] != alignment
+        case .moveColumnRight: return column < columnCount - 1
+        case .align(let current): return alignment != current
         }
     }
 
