@@ -84,6 +84,7 @@ struct TableCellEditingTests {
     // MARK: Row / column operations in the editor
 
     private static let wide = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |"
+    private static let threeColumns = "| A | B | C |\n|---|---|---|\n| 1 | 2 | 3 |\n| 4 | 5 | 6 |\n"
 
     @Test func insertRowBelowAddsARowAndKeepsTheCell() throws {
         let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
@@ -221,87 +222,180 @@ struct TableCellEditingTests {
         #expect(abs(editor.frame.width - cell.width) < 1)
     }
 
-    // MARK: The menu
+    // MARK: The table menu seam
 
-    @Test func theMenuListsEveryOperationWithSeparatorsBetweenGroups() {
-        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
-        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
-        let items = tv.tableOperationMenuItems()
-        #expect(items.filter { !$0.isSeparatorItem }.count == 13)
-        #expect(items.filter(\.isSeparatorItem).count == 2)
-        #expect(!items.contains { $0.title.isEmpty && !$0.isSeparatorItem })
+    private func rightClickEvent() throws -> NSEvent {
+        try #require(NSEvent.mouseEvent(
+            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     }
 
-    @Test func theMenuIsEmptyWhenNoCellIsOpen() {
-        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
-        #expect(tv.tableOperationMenuItems().isEmpty)
-    }
-
-    @Test func menuItemsAreDisabledWhereTheOperationDoesNotApply() throws {
-        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
-        #expect(tv.beginTableCellEditing(tableStart: 0, row: 0, column: 0))   // header, first column
-        let items = tv.tableOperationMenuItems()
-        func item(_ operation: TableOperation) throws -> NSMenuItem {
-            try #require(items.first {
-                ($0.representedObject as? TableOperationBox)?.operation == operation
-            })
+    /// Opens a cell, installs `hook` as the coordinator's table-menu hook and
+    /// returns the menu the editor shows plus the context the hook received.
+    private func menuForOpenCell(
+        _ tv: NativeTextView, _ coordinator: NativeTextViewCoordinator,
+        _ hook: @escaping (NSMenu, TableCellMenuContext) -> NSMenu
+    ) throws -> (menu: NSMenu, context: TableCellMenuContext) {
+        var context: TableCellMenuContext?
+        coordinator.onTableCellContextMenu = { menu, ctx in
+            context = ctx
+            return hook(menu, ctx)
         }
-        #expect(try !item(.deleteRow).isEnabled)
-        #expect(try !item(.insertRowAbove).isEnabled)
-        #expect(try !item(.moveColumnLeft).isEnabled)
-        #expect(try item(.insertRowBelow).isEnabled)
-        #expect(try item(.moveColumnRight).isEnabled)
+        let editor = try #require(tv.tableEditSession?.editor)
+        let menu = try #require(editor.menu(for: try rightClickEvent()))
+        return (menu, try #require(context))
     }
 
-    @Test func theCurrentAlignmentIsChecked() throws {
-        let (tv, coordinator) = makeEditor("| A | B |\n|---|--:|\n| 1 | 2 |\n"); defer { withExtendedLifetime(coordinator) {} }
+    @Test func theHookGetsTheMenuAndTheOpenCellsContext() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
         #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
-        let items = tv.tableOperationMenuItems()
-        let checked = items.filter { $0.state == .on }
-        #expect(checked.count == 1)
-        #expect((checked[0].representedObject as? TableOperationBox)?.operation == .align(.right))
+        var menuGiven: NSMenu?
+        let (menu, context) = try menuForOpenCell(tv, coordinator) { menu, _ in
+            menuGiven = menu
+            return menu
+        }
+
+        #expect(context.row == 1)
+        #expect(context.column == 1)
+        #expect(context.rowCount == 3)          // header + two body rows
+        #expect(context.columnCount == 2)
+        #expect(context.alignment == .left)
+        // The editor's own text items travel with the menu, and what the hook
+        // returns is what is shown.
+        #expect(menu === menuGiven)
+        #expect(!menu.items.isEmpty)
     }
 
-    @Test func choosingAMenuItemRunsItsOperation() throws {
+    @Test func theHookCanReplaceTheMenuItIsGiven() throws {
         let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
         #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
-        let items = tv.tableOperationMenuItems()
-        let insert = try #require(items.first {
-            ($0.representedObject as? TableOperationBox)?.operation == .insertRowBelow
-        })
-        tv.performTableMenuOperation(insert)
-        #expect(tv.string.contains("|  |  |"))
+        let (menu, _) = try menuForOpenCell(tv, coordinator) { _, _ in
+            let custom = NSMenu()
+            custom.addItem(withTitle: "Table", action: nil, keyEquivalent: "")
+            return custom
+        }
+        #expect(menu.items.map(\.title) == ["Table"])
     }
 
-    @Test func theEditorsOwnMenuCarriesTheTableItemsFirst() throws {
+    @Test func isEnabledFollowsTheAvailabilityRules() throws {
+        let (tv, coordinator) = makeEditor(Self.threeColumns); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))    // first body row, first column
+        let (_, context) = try menuForOpenCell(tv, coordinator) { menu, _ in menu }
+
+        #expect(context.isEnabled(.insertRowAbove))
+        #expect(context.isEnabled(.insertRowBelow))
+        #expect(context.isEnabled(.deleteRow))
+        #expect(!context.isEnabled(.moveRowUp))          // can't move up into the header
+        #expect(context.isEnabled(.moveRowDown))
+        #expect(!context.isEnabled(.moveColumnLeft))     // already the first column
+        #expect(context.isEnabled(.moveColumnRight))
+        #expect(context.isEnabled(.deleteColumn))
+        #expect(context.isEnabled(.alignLeft))           // checked, but still clickable
+        #expect(context.isEnabled(.alignCenter))
+        #expect(context.isEnabled(.alignRight))
+    }
+
+    @Test func theHeaderRowAndLastColumnRestrictTheMenu() throws {
+        let (tv, coordinator) = makeEditor(Self.threeColumns); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 0, column: 2))    // header, last column
+        let (_, context) = try menuForOpenCell(tv, coordinator) { menu, _ in menu }
+
+        #expect(!context.isEnabled(.insertRowAbove))
+        #expect(!context.isEnabled(.deleteRow))
+        #expect(!context.isEnabled(.moveRowUp))
+        #expect(!context.isEnabled(.moveRowDown))        // nothing below the header to swap with
+        #expect(context.isEnabled(.insertRowBelow))
+        #expect(!context.isEnabled(.moveColumnRight))    // already the last column
+        #expect(context.isEnabled(.deleteColumn))        // three columns, so one can go
+    }
+
+    @Test func theLastRemainingColumnCannotBeDeleted() throws {
+        let (tv, coordinator) = makeEditor("| A |\n| --- |\n| 1 |\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let (_, context) = try menuForOpenCell(tv, coordinator) { menu, _ in menu }
+        #expect(!context.isEnabled(.deleteColumn))
+        #expect(context.isEnabled(.insertColumnLeft))
+        #expect(context.isEnabled(.insertColumnRight))
+    }
+
+    @Test func theContextReportsTheOpenColumnsAlignment() throws {
+        let (tv, coordinator) = makeEditor("| A | B |\n|---|--:|\n| 1 | 2 |\n")
+        defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
+        let (_, context) = try menuForOpenCell(tv, coordinator) { menu, _ in menu }
+
+        #expect(context.alignment == .right)
+        #expect(context.isEnabled(.alignRight))          // checked, but still clickable
+        #expect(context.isEnabled(.alignLeft))
+    }
+
+    @Test func performLandsOneUndoableEditAndKeepsTheCaretInTheTable() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        tv.allowsUndo = true
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let (_, context) = try menuForOpenCell(tv, coordinator) { menu, _ in menu }
+
+        context.perform(.insertRowBelow)
+        #expect(tv.string == "| A | B |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n| 3 | 4 |\n")
+        #expect(tv.tableEditSession?.row == 1)
+        #expect(tv.tableEditSession?.editor.string == "1")
+
+        tv.endTableCellEditing()
+        tv.undoManager?.undo()
+        #expect(tv.string == Self.wide + "\n")
+    }
+
+    @Test func performCanAlignTheColumn() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
+        let (_, context) = try menuForOpenCell(tv, coordinator) { menu, _ in menu }
+        context.perform(.alignRight)
+        #expect(tv.string.contains("| --- | ---: |"))
+    }
+
+    @Test func withoutAHookTheEditorsOwnMenuIsShownUnchanged() throws {
         let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
         #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
         let editor = try #require(tv.tableEditSession?.editor)
-        let event = try #require(NSEvent.mouseEvent(
-            with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
-            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
-        let menu = try #require(editor.menu(for: event))
-        #expect((menu.items.first?.representedObject as? TableOperationBox)?.operation == .insertRowAbove)
-        #expect(menu.items.count > 14)                    // table items + separator + text items
+        let menu = try #require(editor.menu(for: try rightClickEvent()))
+        #expect(!menu.items.isEmpty)                     // the ordinary text menu
+        #expect(!menu.items.contains { $0.title == "Table" })
     }
 
-    // MARK: Menu text
+    @Test func settingTheHookToNilAddsNothing() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        coordinator.onTableCellContextMenu = { _, _ in
+            let custom = NSMenu()
+            custom.addItem(withTitle: "Table", action: nil, keyEquivalent: "")
+            return custom
+        }
+        #expect(try #require(editor.menu(for: try rightClickEvent())).items.contains { $0.title == "Table" })
 
-    @Test func everyMenuTitleHasATranslation() throws {
-        let operations: [TableOperation] = [
+        coordinator.onTableCellContextMenu = nil
+        #expect(!(try #require(editor.menu(for: try rightClickEvent())).items.contains { $0.title == "Table" }))
+    }
+
+    @Test func theHookIsNotCalledWithoutAnOpenCell() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        var called = false
+        coordinator.onTableCellContextMenu = { menu, _ in called = true; return menu }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        tv.endTableCellEditing()
+        _ = editor.menu(for: try rightClickEvent())
+        #expect(!called)
+    }
+
+    @Test func everyInternalOperationHasAPublicCase() {
+        let internalOperations: [TableOperation] = [
             .insertRowAbove, .insertRowBelow, .deleteRow, .moveRowUp, .moveRowDown,
             .insertColumnLeft, .insertColumnRight, .deleteColumn, .moveColumnLeft, .moveColumnRight,
             .align(.left), .align(.center), .align(.right),
         ]
-        let chinese = try #require(Bundle.module.path(forResource: "zh-Hans", ofType: "lproj").flatMap(Bundle.init(path:)))
-        let english = try #require(Bundle.module.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:)))
-        for operation in operations {
-            let key = operation.titleKey
-            let zh = chinese.localizedString(forKey: key, value: "⟂missing", table: nil)
-            let en = english.localizedString(forKey: key, value: "⟂missing", table: nil)
-            #expect(zh != "⟂missing" && zh != key, "no Chinese for \(key)")
-            #expect(en == key)
-        }
+        #expect(TableEditOperation.allCases.map { $0.operation } == internalOperations)
+        #expect(internalOperations.map { TableEditOperation($0).operation } == internalOperations)
     }
 
     // MARK: The switch

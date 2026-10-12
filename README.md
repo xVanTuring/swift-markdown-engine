@@ -26,8 +26,12 @@ checkboxes.
 
 - **Live Markdown styling** — bold, italic, headings, lists, blockquotes, GFM tables, code, links, task checkboxes, horizontal rules
 - **In-place table editing** — click a cell of a rendered table to edit its
-  Markdown; Tab/arrows navigate, Return adds a line break, right-click for
-  row / column operations and alignment (`editsTablesInPlace`)
+  Markdown; Tab/arrows navigate, Return adds a line break
+  (`editsTablesInPlace`). The engine ships no table menu: a right-click hands
+  your `onTableCellContextMenu` hook the editor's menu plus a
+  `TableCellMenuContext` — the cell, the row/column counts, the column's
+  alignment and which `TableEditOperation`s apply — and you build and
+  localize the items yourself
 - **Wiki-style linking** with two-form storage / display roundtripping
   (`[[Name|<id>]]` ↔ `[[Name]]`)
 - **Image embeds** — both `![[Name]]` (Obsidian-style, embedder supplies the                           

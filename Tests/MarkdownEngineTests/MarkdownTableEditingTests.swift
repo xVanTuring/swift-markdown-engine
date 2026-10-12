@@ -261,14 +261,4 @@ struct TableOperationTests {
         #expect(r.table.header == t.header)
         #expect(r.row == 0 && r.column == 0)
     }
-
-    @Test("every operation has a menu title")
-    func titles() {
-        let all: [TableOperation] = [
-            .insertRowAbove, .insertRowBelow, .deleteRow, .moveRowUp, .moveRowDown,
-            .insertColumnLeft, .insertColumnRight, .deleteColumn, .moveColumnLeft, .moveColumnRight,
-            .align(.left), .align(.center), .align(.right),
-        ]
-        #expect(Set(all.map(\.titleKey)).count == all.count)
-    }
 }

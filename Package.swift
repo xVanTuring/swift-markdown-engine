@@ -17,7 +17,6 @@ import PackageDescription
 // at link time.
 let package = Package(
     name: "MarkdownEngine",
-    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "MarkdownEngine", targets: ["MarkdownEngine"]),
@@ -30,8 +29,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "MarkdownEngine",
-            resources: [.process("Resources")]
+            name: "MarkdownEngine"
         ),
         .target(
             name: "MarkdownEngineCodeBlocks",

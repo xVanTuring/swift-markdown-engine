@@ -82,6 +82,9 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     /// Embedder hook to build the right-click menu (the engine ships none). Gets the
     /// default menu + current selection range, returns the menu to show.
     var onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)?
+    /// Embedder hook to build the table cell editor's menu (the engine ships
+    /// none). Gets the editor's own menu + the open cell, returns the menu to show.
+    var onTableCellContextMenu: ((NSMenu, TableCellMenuContext) -> NSMenu)?
     var onInlineSelectionChange: ((InlineSelectionState?) -> Void)?
     var onInlinePreviewKey: ((InlinePreviewKey) -> Bool)?
     /// Directive autocomplete: published whenever the caret's completion

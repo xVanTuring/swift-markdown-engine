@@ -90,6 +90,10 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
     /// Build the editor's right-click menu (the engine ships no menu). Receives the default
     /// NSMenu + the current selection range; return the menu to display (or unchanged).
     public var onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)?
+    /// Build the table cell editor's right-click menu (the engine ships none). Receives the
+    /// editor's own menu + a ``TableCellMenuContext`` for the open cell; return the menu to
+    /// display (or unchanged). `nil` leaves the plain text menu untouched.
+    public var onTableCellContextMenu: ((NSMenu, TableCellMenuContext) -> NSMenu)?
     /// Fires when the caret enters or leaves a `[[Name]]` or `![[…]]`
     /// token. `nil` means the caret is no longer inside such a token.
     public var onInlineSelectionChange: ((InlineSelectionState?) -> Void)?
@@ -163,6 +167,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         onCaretRectChange: ((CGRect) -> Void)? = nil,
         onTextMutation: ((MarkdownTextMutation) -> Void)? = nil,
         onBuildContextMenu: ((NSMenu, NSRange) -> NSMenu)? = nil,
+        onTableCellContextMenu: ((NSMenu, TableCellMenuContext) -> NSMenu)? = nil,
         onInlineSelectionChange: ((InlineSelectionState?) -> Void)? = nil,
         onInlinePreviewKey: ((InlinePreviewKey) -> Bool)? = nil,
         onDirectiveCompletion: ((DirectiveCompletionContext?) -> Void)? = nil,
@@ -191,6 +196,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         self.onCaretRectChange = onCaretRectChange
         self.onTextMutation = onTextMutation
         self.onBuildContextMenu = onBuildContextMenu
+        self.onTableCellContextMenu = onTableCellContextMenu
         self.onInlineSelectionChange = onInlineSelectionChange
         self.onInlinePreviewKey = onInlinePreviewKey
         self.onDirectiveCompletion = onDirectiveCompletion
@@ -345,6 +351,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         context.coordinator.onCaretRectChange = onCaretRectChange
         context.coordinator.onTextMutation = onTextMutation
         context.coordinator.onBuildContextMenu = onBuildContextMenu
+        context.coordinator.onTableCellContextMenu = onTableCellContextMenu
         context.coordinator.onInlineSelectionChange = onInlineSelectionChange
         context.coordinator.onInlinePreviewKey = onInlinePreviewKey
         context.coordinator.onDirectiveCompletion = onDirectiveCompletion
@@ -728,6 +735,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         context.coordinator.onCaretRectChange = onCaretRectChange
         context.coordinator.onTextMutation = onTextMutation
         context.coordinator.onBuildContextMenu = onBuildContextMenu
+        context.coordinator.onTableCellContextMenu = onTableCellContextMenu
         context.coordinator.onInlineSelectionChange = onInlineSelectionChange
         context.coordinator.onInlinePreviewKey = onInlinePreviewKey
         context.coordinator.onDirectiveCompletion = onDirectiveCompletion

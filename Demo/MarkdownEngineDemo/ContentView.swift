@@ -57,6 +57,7 @@ struct ContentView: View {
             fontSize: fontSize,
             isEditable: !isReadOnly,
             onCaretRectChange: { completionAnchor = $0 },
+            onTableCellContextMenu: tableCellMenu,
             onInlinePreviewKey: handleCompletionKey,
             onDirectiveCompletion: { context in
                 completion = context
@@ -304,6 +305,61 @@ struct ContentView: View {
 
         return config
     }
+
+    /// The demo's own table menu, built the way an embedder would: the engine
+    /// ships no items and no titles, so every string here (and any translation
+    /// of it) is the app's. `context.isEnabled` carries the engine's rules —
+    /// the header can't be deleted, the last column can't move right — so the
+    /// menu stays in step with the edit without restating them.
+    private func tableCellMenu(_ menu: NSMenu, _ context: TableCellMenuContext) -> NSMenu {
+        func item(_ title: String, _ operation: TableEditOperation, checked: Bool = false) -> NSMenuItem {
+            let action = TableMenuAction { context.perform(operation) }
+            let item = NSMenuItem(title: title, action: #selector(TableMenuAction.performOperation(_:)), keyEquivalent: "")
+            item.target = action
+            // A menu item's target is weak, so keep the action alive here.
+            item.representedObject = action
+            item.isEnabled = context.isEnabled(operation)
+            item.state = checked ? .on : .off
+            return item
+        }
+        let groups: [[NSMenuItem]] = [
+            [
+                item("Insert Row Above", .insertRowAbove),
+                item("Insert Row Below", .insertRowBelow),
+                item("Move Row Up", .moveRowUp),
+                item("Move Row Down", .moveRowDown),
+                item("Delete Row", .deleteRow),
+            ],
+            [
+                item("Insert Column Left", .insertColumnLeft),
+                item("Insert Column Right", .insertColumnRight),
+                item("Move Column Left", .moveColumnLeft),
+                item("Move Column Right", .moveColumnRight),
+                item("Delete Column", .deleteColumn),
+            ],
+            [
+                item("Align Left", .alignLeft, checked: context.alignment == .left),
+                item("Align Center", .alignCenter, checked: context.alignment == .center),
+                item("Align Right", .alignRight, checked: context.alignment == .right),
+            ],
+        ]
+        var items: [NSMenuItem] = []
+        for group in groups {
+            if !items.isEmpty { items.append(.separator()) }
+            items.append(contentsOf: group)
+        }
+        menu.insertItem(.separator(), at: 0)
+        for item in items.reversed() { menu.insertItem(item, at: 0) }
+        return menu
+    }
+}
+
+/// Runs an operation from a menu item: AppKit menu items go through a
+/// target/action pair, and the demo has no controller object to hang it on.
+private final class TableMenuAction: NSObject {
+    private let run: () -> Void
+    init(_ run: @escaping () -> Void) { self.run = run }
+    @objc func performOperation(_ sender: Any?) { run() }
 }
 
 /// Builds the demo markdown shown when the editor first loads.
