@@ -713,6 +713,21 @@ struct TableCellEditingTests {
         #expect(tv.string == "| A | B |\n| --- | --- |\n|  |  |\n| 3 | 4 |\n")
     }
 
+    @Test func draggingAGripMovesTheColumnAndKeepsItSelected() throws {
+        let (tv, coordinator) = makeEditor(Self.threeColumns); defer { withExtendedLifetime(coordinator) {} }
+        tv.moveTableLine(tableStart: 0, axis: .column, from: 0, to: 2)
+        #expect(tv.string == "| B | C | A |\n| --- | --- | --- |\n| 2 | 3 | 1 |\n| 5 | 6 | 4 |\n")
+        #expect(tv.tableSelectionState?.selection == TableCellSelection(rows: 0...2, columns: 2...2))
+    }
+
+    @Test func theHeaderRowNeverMoves() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        tv.moveTableLine(tableStart: 0, axis: .row, from: 0, to: 2)
+        #expect(tv.string == Self.wide + "\n")
+        tv.moveTableLine(tableStart: 0, axis: .row, from: 1, to: 2)
+        #expect(tv.string == "| A | B |\n| --- | --- |\n| 3 | 4 |\n| 1 | 2 |\n")
+    }
+
     @Test func turningSelectionOffDropsIt() throws {
         let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
         tv.setTableSelection(tableStart: 0, TableCellSelection(rows: 1...1, columns: 0...1))

@@ -12,6 +12,7 @@ import AppKit
 extension NativeTextView {
 
     override func mouseMoved(with event: NSEvent) {
+        updateTableGrips(for: event)
         if isInCursorExclusionZone(event) {
             // Editable+excluded = a panel over the editor (#81): own the arrow.
             // Read-only+excluded = a full-window overlay (search/transfer) owns
