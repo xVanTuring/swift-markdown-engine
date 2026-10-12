@@ -101,6 +101,9 @@ public struct MarkdownEditorConfiguration: Sendable {
     /// When `false`, a table shows its source whenever the caret is inside it.
     /// Has no effect in ``rawSourceMode``.
     public var editsTablesInPlace: Bool
+    /// Cell selection, row / column grips and Delete behavior on a table being
+    /// edited in place. Needs ``editsTablesInPlace``.
+    public var tableInteraction: TableInteractionStyle
 
     public init(
         theme: MarkdownEditorTheme = .default,
@@ -132,8 +135,10 @@ public struct MarkdownEditorConfiguration: Sendable {
         cursorFollowsSpanInk: Bool = false,
         directives: [any MarkdownDirective] = [],
         directiveSettings: DirectiveRegistrySettings = .default,
-        editsTablesInPlace: Bool = true
+        editsTablesInPlace: Bool = true,
+        tableInteraction: TableInteractionStyle = .default
     ) {
+        self.tableInteraction = tableInteraction
         self.theme = theme
         self.services = services
         self.markers = markers
@@ -555,6 +560,32 @@ public struct ImageEmbedStyle: Sendable {
     }
 
     public static let `default` = ImageEmbedStyle()
+}
+
+// MARK: - Table interaction
+
+/// How a table edited in place can be selected and rearranged.
+public struct TableInteractionStyle: Sendable {
+    /// Dragging across cells selects a block of them (outlined, with a tint);
+    /// a plain click still opens the cell for editing.
+    public var selectsCells: Bool
+    /// Hovering a table shows a grip above the column and beside the row under
+    /// the pointer: click selects the whole column / row, drag moves it.
+    public var showsGrips: Bool
+    /// What Delete does to selected rows / columns.
+    public var deleteBehavior: TableDeleteBehavior
+
+    public init(
+        selectsCells: Bool = true,
+        showsGrips: Bool = true,
+        deleteBehavior: TableDeleteBehavior = .clearThenRemove
+    ) {
+        self.selectsCells = selectsCells
+        self.showsGrips = showsGrips
+        self.deleteBehavior = deleteBehavior
+    }
+
+    public static let `default` = TableInteractionStyle()
 }
 
 // MARK: - LaTeX

@@ -181,9 +181,20 @@ final class WideTableImageView: NSImageView {
             // This view is not flipped; the geometry is top-down.
             let local = convert(event.locationInWindow, from: nil)
             let imagePoint = CGPoint(x: local.x, y: bounds.height - local.y)
-            if let cell = geometry.cell(at: imagePoint),
-               textView.beginTableCellEditing(tableStart: token.range.location, row: cell.row, column: cell.column) {
-                return
+            if let cell = geometry.cell(at: imagePoint) {
+                if textView.canSelectTableCells {
+                    let dragged = textView.trackTableCellSelection(
+                        tableStart: token.range.location, anchor: cell
+                    ) { [weak self] drag in
+                        guard let self else { return nil }
+                        let p = self.convert(drag.locationInWindow, from: nil)
+                        return geometry.nearestCell(to: CGPoint(x: p.x, y: self.bounds.height - p.y))
+                    }
+                    if dragged { return }
+                }
+                if textView.beginTableCellEditing(tableStart: token.range.location, row: cell.row, column: cell.column) {
+                    return
+                }
             }
         }
         textView.window?.makeFirstResponder(textView)

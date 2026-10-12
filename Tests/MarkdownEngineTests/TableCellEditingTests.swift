@@ -690,4 +690,34 @@ struct TableCellEditingTests {
         try await Task.sleep(nanoseconds: 100_000_000)
         #expect(tv.tableEditSession == nil)
     }
+
+    // MARK: Cell selection
+
+    @Test func deleteOnASelectedRowClearsThenRemoves() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        tv.setTableSelection(tableStart: 0, TableCellSelection(rows: 2...2, columns: 0...1))
+        tv.deleteTableSelection()
+        #expect(tv.string == "| A | B |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n")
+        #expect(tv.tableSelectionState != nil)
+        tv.deleteTableSelection()
+        #expect(tv.string == "| A | B |\n| --- | --- |\n| 1 | 2 |\n")
+        #expect(tv.tableSelectionState == nil)
+    }
+
+    @Test func clearOnlyKeepsTheShape() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        tv.configuration.tableInteraction.deleteBehavior = .clearOnly
+        tv.setTableSelection(tableStart: 0, TableCellSelection(rows: 1...1, columns: 0...1))
+        tv.deleteTableSelection()
+        tv.deleteTableSelection()
+        #expect(tv.string == "| A | B |\n| --- | --- |\n|  |  |\n| 3 | 4 |\n")
+    }
+
+    @Test func turningSelectionOffDropsIt() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        tv.setTableSelection(tableStart: 0, TableCellSelection(rows: 1...1, columns: 0...1))
+        #expect(tv.tableSelectionState != nil)
+        tv.configuration.tableInteraction.selectsCells = false
+        #expect(tv.tableSelectionState == nil)
+    }
 }
