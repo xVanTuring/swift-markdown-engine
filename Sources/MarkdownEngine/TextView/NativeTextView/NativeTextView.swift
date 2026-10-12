@@ -87,6 +87,10 @@ final class NativeTextView: NSTextView {
     var tableEditSession: TableEditSession?
     /// The selected block of cells, if any; managed by `NativeTextView+TableSelection.swift`.
     var tableSelectionState: TableSelectionState?
+    /// The grips shown for the hovered cell, if any; managed by `NativeTextView+TableGrips.swift`.
+    var tableGripState: TableGripState?
+    /// A grip is being dragged; the hover grips stay put until it ends.
+    var tableGripDragInProgress = false
     /// True while the engine itself moves the caret or rewrites a table, so
     /// that doesn't re-open a cell editor.
     var suppressTableEntry = false

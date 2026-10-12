@@ -163,6 +163,27 @@ final class WideTableImageView: NSImageView {
 
     weak var ownerOverlay: WideTableOverlay?
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil
+        ))
+    }
+
+    /// Shows the row / column grips of the cell under the pointer.
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        guard let overlay = ownerOverlay, let textView = overlay.ownerTextView,
+              textView.showsTableGrips,
+              let geometry = image?.tableGeometry,
+              let token = textView.tableToken(containing: overlay.anchorTextLocation) else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        if let cell = geometry.cell(at: CGPoint(x: local.x, y: bounds.height - local.y)) {
+            textView.showTableGrips(tableStart: token.range.location, row: cell.row, column: cell.column)
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
         guard let overlay = ownerOverlay,
               let textView = overlay.ownerTextView else {

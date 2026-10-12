@@ -100,6 +100,7 @@ extension NativeTextView {
     func clearTableSelection() {
         tableSelectionState?.view.removeFromSuperview()
         tableSelectionState = nil
+        updateGripSelectionHighlight()
     }
 
     // MARK: Layout
@@ -137,6 +138,7 @@ extension NativeTextView {
         if view.superview !== first.host { first.host.addSubview(view) }
         view.frame = frame
         view.needsDisplay = true
+        updateGripSelectionHighlight()
     }
 
     // MARK: Keys

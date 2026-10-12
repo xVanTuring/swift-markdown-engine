@@ -572,6 +572,7 @@ extension NativeTextView {
     @discardableResult
     func layoutTableCellEditor() -> Bool {
         layoutTableSelection()
+        layoutTableGrips()
         guard let session = tableEditSession, !session.isFinishing else { return false }
         guard let (token, parsed) = table(startingAt: session.tableStart),
               session.row < parsed.rowCount, session.column < parsed.columnCount,
