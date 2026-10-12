@@ -326,8 +326,9 @@ public struct ListStyle: Sendable {
     public var helpersEnabled: Bool
     /// Master switch for auto-closing pairs `()`, `{}`, `[]` while typing.
     public var autoClosePairsEnabled: Bool
-    /// When `true`, typing `]` right after `- [` turns the empty checkbox
-    /// `- []` into `- [ ]`.
+    /// When `true`, typing `[` right after a list marker (`- `) completes the
+    /// checkbox as `- [ ] `; with auto-closing pairs off, typing `]` after
+    /// `- [` does the same.
     public var autoSpaceTaskCheckbox: Bool
     /// Indent (in points) that one nesting level adds to the list item.
     public var indentPerLevel: CGFloat
