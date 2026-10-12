@@ -19,18 +19,21 @@ struct TaskCheckboxAutoSpaceTests {
     private func typeBracket(
         in text: String,
         caret: Int,
-        enabled: Bool = true
+        enabled: Bool = true,
+        typing character: String = "]",
+        autoClosePairs: Bool = true
     ) -> (text: String, caret: Int, handled: Bool) {
         let textView = NativeTextView(frame: .zero)
         var config = MarkdownEditorConfiguration.default
         config.lists.autoSpaceTaskCheckbox = enabled
+        config.lists.autoClosePairsEnabled = autoClosePairs
         textView.configuration = config
         textView.string = text
         textView.setSelectedRange(NSRange(location: caret, length: 0))
         let passThrough = MarkdownLists.handleInsertion(
             textView: textView,
             affectedCharRange: NSRange(location: caret, length: 0),
-            replacementString: "]",
+            replacementString: character,
             isInsideCodeBlock: false
         )
         return (textView.string, textView.selectedRange().location, !passThrough)
@@ -83,5 +86,32 @@ struct TaskCheckboxAutoSpaceTests {
         let r = typeBracket(in: "- [", caret: 3, enabled: false)
         #expect(r.text == "- [")
         #expect(!r.handled)
+    }
+
+    @Test("`- ` + `[` completes the checkbox in one keystroke")
+    func openBracketCompletesCheckbox() {
+        let r = typeBracket(in: "- ", caret: 2, typing: "[")
+        #expect(r.text == "- [ ] ")
+        #expect(r.caret == 6)
+        #expect(r.handled)
+        #expect(typeBracket(in: "1. ", caret: 3, typing: "[").text == "1. [ ] ")
+        #expect(typeBracket(in: "intro\n\t- ", caret: 9, typing: "[").text == "intro\n\t- [ ] ")
+    }
+
+    @Test("`[` reuses a space that already follows")
+    func openBracketReusesFollowingSpace() {
+        let r = typeBracket(in: "-  foo", caret: 2, typing: "[")
+        #expect(r.text == "- [ ] foo")
+        #expect(r.caret == 6)
+    }
+
+    @Test("`[` elsewhere still auto-closes as before")
+    func openBracketElsewhere() {
+        #expect(typeBracket(in: "see ", caret: 4, typing: "[").text == "see []")
+        #expect(!typeBracket(in: "- ", caret: 2, enabled: false, typing: "[").text.contains(" ] "))
+        // Without auto-closing, `[` is a plain character; `]` completes it.
+        let plain = typeBracket(in: "- ", caret: 2, typing: "[", autoClosePairs: false)
+        #expect(plain.text == "- ")
+        #expect(!plain.handled)
     }
 }

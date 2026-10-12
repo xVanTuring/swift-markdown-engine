@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **In-place table editing**: a rendered GFM table stays rendered while you edit. Click a cell to edit its raw Markdown (inline formatting included) in an overlay editor; leaving the cell writes the change back as one undoable edit. Return inserts a line break (`<br>`) and the row grows with it; Tab / Shift-Tab / arrow keys move between cells; Esc leaves. Turn it off with `MarkdownEditorConfiguration.editsTablesInPlace` (default `true`).
-- `ListStyle.autoSpaceTaskCheckbox` (default `true`): typing `- []` becomes `- [ ] ` with the caret after the space.
+- `ListStyle.autoSpaceTaskCheckbox` (default `true`): typing `[` (or `]`) right after a list marker completes the checkbox as `- [ ] `, with the caret after the space. With auto-closing pairs on, `[` alone is enough, since it already supplies the `]`.
 
 ### Changed
 - **Table right-click menu moved to the embedder.** The table editor no longer ships a menu of its own; without the hook, a right-click shows only the plain text menu. A right-click on a table cell hands your `onTableCellContextMenu` hook the editor's own menu plus a `TableCellMenuContext` — the open cell, the row and column counts, the column's alignment, and which `TableEditOperation`s apply (`context.isEnabled(_:)` carries the engine's rules) — and your app builds and localizes the items; `context.perform(_:)` runs one as a single undoable edit. The engine's bundled en/zh-Hans titles and their resource bundle are gone; the demo builds its own English menu through the hook.

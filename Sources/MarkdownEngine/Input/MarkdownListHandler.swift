@@ -160,6 +160,24 @@ struct MarkdownLists {
             }
         }
 
+        // `- ` + `[` → `- [ ] `: with auto-closing pairs on, `[` already supplies
+        // the `]`, so the checkbox is complete without a second keystroke.
+        if replacementString == "[" && affectedCharRange.length == 0 && !isInCodeBlock
+            && autoClosePairsEnabled && activeConfig.lists.autoSpaceTaskCheckbox {
+            let nsText = textView.string as NSString
+            let loc = min(affectedCharRange.location, nsText.length)
+            let lineStart = nsText.lineRange(for: NSRange(location: loc, length: 0)).location
+            let before = nsText.substring(with: NSRange(location: lineStart, length: loc - lineStart))
+            if before.range(of: "^[ \\t]*([-*+]|\\d+[.)]) $", options: .regularExpression) != nil {
+                // Reuse a space that already follows, so `- |foo` doesn't get two.
+                let spaceFollows = loc < nsText.length
+                    && nsText.substring(with: NSRange(location: loc, length: 1)) == " "
+                MarkdownLists.performEdit(textView, replace: affectedCharRange, with: spaceFollows ? "[ ]" : "[ ] ")
+                textView.setSelectedRange(NSRange(location: loc + 4, length: 0))
+                return false
+            }
+        }
+
         // Autocomplete Obsidian-style node brackets and single square brackets
         if replacementString == "[" {
             let nsText = textView.string as NSString
