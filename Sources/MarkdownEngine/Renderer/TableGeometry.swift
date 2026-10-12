@@ -52,6 +52,17 @@ final class TableGeometry {
         }
         return (index(of: point.y, in: rowTop), index(of: point.x, in: columnLeft))
     }
+
+    /// The cell closest to `point` (image coordinates), even when it lies
+    /// outside the table — a drag that leaves the table keeps selecting.
+    func nearestCell(to point: CGPoint) -> (row: Int, column: Int)? {
+        guard columnCount > 0, rowCount > 0 else { return nil }
+        let clamped = CGPoint(
+            x: min(max(point.x, 0), imageSize.width),
+            y: min(max(point.y, 0), imageSize.height)
+        )
+        return cell(at: clamped)
+    }
 }
 
 private var tableGeometryKey: UInt8 = 0

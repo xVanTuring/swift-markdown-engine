@@ -259,7 +259,7 @@ extension NativeTextView {
     }
 
     /// The rendered image of the table at `range`, with its cell layout and anchor character.
-    private func renderedTable(in range: NSRange) -> (image: NSImage, geometry: TableGeometry, anchor: NSRange)? {
+    func renderedTable(in range: NSRange) -> (image: NSImage, geometry: TableGeometry, anchor: NSRange)? {
         guard let storage = textStorage, storage.length > 0 else { return nil }
         let clamped = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard clamped.length > 0 else { return nil }
@@ -275,7 +275,7 @@ extension NativeTextView {
 
     /// Where a cell sits, in the coordinates of the view that hosts the editor.
     /// Wide (scrolling) tables live in an overlay, so the editor joins it there.
-    private func cellFrame(
+    func cellFrame(
         row: Int, column: Int,
         image: NSImage, geometry: TableGeometry, anchor: NSRange
     ) -> (host: NSView, frame: NSRect)? {
@@ -328,6 +328,20 @@ extension NativeTextView {
                 guard let placed = cellFrame(row: row, column: column, image: rendered.image,
                                              geometry: rendered.geometry, anchor: rendered.anchor),
                       placed.host === self, placed.frame.contains(point) else { continue }
+                if canSelectTableCells {
+                    // The cell under the press, and its image's origin in this view,
+                    // so a drag can be mapped to the nearest cell.
+                    let cellRect = rendered.geometry.cellRect(row: row, column: column) ?? .zero
+                    let origin = CGPoint(x: placed.frame.minX - cellRect.minX, y: placed.frame.minY - cellRect.minY)
+                    let dragged = trackTableCellSelection(
+                        tableStart: token.range.location, anchor: (row, column)
+                    ) { [weak self] event in
+                        guard let self else { return nil }
+                        let p = self.convert(event.locationInWindow, from: nil)
+                        return rendered.geometry.nearestCell(to: CGPoint(x: p.x - origin.x, y: p.y - origin.y))
+                    }
+                    if dragged { return true }
+                }
                 return beginTableCellEditing(tableStart: token.range.location, row: row, column: column,
                                              clickPoint: point)
             }
@@ -342,6 +356,7 @@ extension NativeTextView {
         clickPoint: NSPoint? = nil, selectAll: Bool = false
     ) -> Bool {
         guard canEditTablesInPlace else { return false }
+        clearTableSelection()
         // Closing the open cell can rewrite its table; a table further down
         // then starts at a different offset.
         let previousStart = tableEditSession?.tableStart
@@ -556,6 +571,7 @@ extension NativeTextView {
     /// table or cell can no longer be found.
     @discardableResult
     func layoutTableCellEditor() -> Bool {
+        layoutTableSelection()
         guard let session = tableEditSession, !session.isFinishing else { return false }
         guard let (token, parsed) = table(startingAt: session.tableStart),
               session.row < parsed.rowCount, session.column < parsed.columnCount,

@@ -45,6 +45,7 @@ final class NativeTextView: NSTextView {
             if tableEditSession != nil, !canEditTablesInPlace {
                 endTableCellEditing()
             }
+            if tableSelectionState != nil, !canSelectTableCells { clearTableSelection() }
         }
     }
     var overscrollPercent: CGFloat = MarkdownEditorConfiguration.default.overscroll.percent
@@ -84,6 +85,8 @@ final class NativeTextView: NSTextView {
     // MARK: In-place table editing
     /// The open cell editor, if any; managed by `NativeTextView+TableCellEditing.swift`.
     var tableEditSession: TableEditSession?
+    /// The selected block of cells, if any; managed by `NativeTextView+TableSelection.swift`.
+    var tableSelectionState: TableSelectionState?
     /// True while the engine itself moves the caret or rewrites a table, so
     /// that doesn't re-open a cell editor.
     var suppressTableEntry = false
