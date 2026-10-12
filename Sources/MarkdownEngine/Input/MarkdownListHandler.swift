@@ -93,6 +93,29 @@ struct MarkdownLists {
         return pasted.replacingOccurrences(of: "\n", with: "\n" + prefix)
     }
 
+    /// Openers that wrap a selection, with the closer each one adds.
+    private static let wrapClosers: [String: String] = [
+        "(": ")", "[": "]", "{": "}",
+        "=": "=", "*": "*", "_": "_", "~": "~", "`": "`", "$": "$",
+    ]
+    /// The bracket openers; the other wrappers are Markdown markers, which
+    /// are not applied inside code (a backtick is exempt: the span it just
+    /// made is code, and typing it again must still wrap).
+    private static let bracketClosers: [String: String] = ["(": ")", "[": "]", "{": "}"]
+
+    /// Whether typing `]` at `location` is the `- [` + `]` checkbox completion,
+    /// which takes priority over stepping over a closer.
+    private static func completesTaskCheckbox(
+        textView: NSTextView, at location: Int, activeConfig: MarkdownEditorConfiguration, isInCodeBlock: Bool
+    ) -> Bool {
+        guard !isInCodeBlock, activeConfig.lists.autoSpaceTaskCheckbox else { return false }
+        let nsText = textView.string as NSString
+        let loc = min(location, nsText.length)
+        let lineStart = nsText.lineRange(for: NSRange(location: loc, length: 0)).location
+        let before = nsText.substring(with: NSRange(location: lineStart, length: loc - lineStart))
+        return before.range(of: "^[ \\t]*([-*+]|\\d+[.)]) \\[$", options: .regularExpression) != nil
+    }
+
     // MARK: - Input Handling
 
     /// `isInsideCodeBlock` is the caller's pre-parsed answer for
@@ -105,8 +128,9 @@ struct MarkdownLists {
         // Fast path: plain characters never trigger list/pair/arrow handling.
         if replacementString.count == 1,
            let ch = replacementString.first,
-           ch != ">" && ch != "[" && ch != "]" && ch != "(" && ch != "{" &&
-           ch != "\t" && ch != " " && ch != "\n" {
+           ch != ">" && ch != "[" && ch != "]" && ch != "(" && ch != ")" && ch != "{" && ch != "}" && ch != "=" &&
+           ch != "\t" && ch != " " && ch != "\n",
+           affectedCharRange.length == 0 || Self.wrapClosers[replacementString] == nil {
             return true
         }
 
@@ -126,6 +150,38 @@ struct MarkdownLists {
                 ? MarkdownDetection.isInsideCodeBlock(location: affectedCharRange.location, in: textView.string)
                 : false
         )
+
+        // Selection + opener → wrap the selection and keep it selected, so typing
+        // the opener again wraps once more: `(` `(` gives `((text))`, `=` `=`
+        // gives `==text==` (highlight), `*` `*` gives `**text**`.
+        if autoClosePairsEnabled, affectedCharRange.length > 0,
+           let close = Self.wrapClosers[replacementString],
+           Self.bracketClosers[replacementString] != nil || replacementString == "`" || !isInCodeBlock,
+           !textView.hasMarkedText() {
+            let nsText = textView.string as NSString
+            if NSMaxRange(affectedCharRange) <= nsText.length {
+                let selected = nsText.substring(with: affectedCharRange)
+                MarkdownLists.performEdit(textView, replace: affectedCharRange, with: replacementString + selected + close)
+                textView.setSelectedRange(NSRange(
+                    location: affectedCharRange.location + (replacementString as NSString).length,
+                    length: affectedCharRange.length
+                ))
+                return false
+            }
+        }
+
+        // Typing a closer right before the same closer steps over it instead of
+        // writing a second one (the counterpart of auto-closing `(` → `()`).
+        if autoClosePairsEnabled, affectedCharRange.length == 0,
+           replacementString == ")" || replacementString == "]" || replacementString == "}",
+           !(replacementString == "]" && Self.completesTaskCheckbox(textView: textView, at: affectedCharRange.location, activeConfig: activeConfig, isInCodeBlock: isInCodeBlock)) {
+            let nsText = textView.string as NSString
+            let loc = affectedCharRange.location
+            if loc < nsText.length, nsText.substring(with: NSRange(location: loc, length: 1)) == replacementString {
+                textView.setSelectedRange(NSRange(location: loc + 1, length: 0))
+                return false
+            }
+        }
 
         if replacementString == ">" && affectedCharRange.length == 0 && !isInCodeBlock {
             let insertionLocation = affectedCharRange.location

@@ -324,7 +324,9 @@ public struct ListStyle: Sendable {
     /// auto-indent, marker conversion). When `false`, lists are still
     /// rendered, but typing-time conveniences are skipped.
     public var helpersEnabled: Bool
-    /// Master switch for auto-closing pairs `()`, `{}`, `[]` while typing.
+    /// Master switch for auto-closing pairs `()`, `{}`, `[]` while typing: it also
+    /// covers stepping over a typed closer and wrapping a selection when an
+    /// opener or Markdown marker (`= * _ ~ ` $`) is typed over it.
     public var autoClosePairsEnabled: Bool
     /// When `true`, typing `[` right after a list marker (`- `) completes the
     /// checkbox as `- [ ] `; with auto-closing pairs off, typing `]` after
