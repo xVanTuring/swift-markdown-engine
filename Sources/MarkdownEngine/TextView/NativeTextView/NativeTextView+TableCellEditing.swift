@@ -24,6 +24,9 @@ final class TableEditSession {
     var isFinishing = false
     /// Pending write of the editor's text to the document (see `scheduleTableCellSync`).
     var pendingSync: DispatchWorkItem?
+    /// The editor's text is taller than its cell, so the row has to grow;
+    /// set by `layoutTableCellEditor`.
+    var outgrewCell = false
 
     init(tableStart: Int, row: Int, column: Int, editor: TableCellEditorView) {
         self.tableStart = tableStart
@@ -111,6 +114,16 @@ final class TableCellEditorView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         owner?.layoutTableCellEditor()
+        // Text that no longer fits its cell would spill over the row below for
+        // the length of the debounce; write it now so the row grows at once. That
+        // holds while an input method is composing too: the write leaves the
+        // editor's text (and its marked range) alone, and waiting would leave the
+        // composition wrapped over the rows below until it is committed.
+        if let owner, owner.tableEditSession?.outgrewCell == true {
+            owner.tableEditSession?.pendingSync?.cancel()
+            owner.syncTableCellToDocument()
+            return
+        }
         owner?.scheduleTableCellSync()
     }
 
@@ -183,6 +196,15 @@ final class TableCellEditorView: NSTextView {
     private var isCaretOnLastLine: Bool {
         let length = (string as NSString).length
         return abs(lineY(at: NSMaxRange(selectedRange())) - lineY(at: length)) < 1
+    }
+
+    /// Width of the longest line on one row, padding included.
+    func requiredWidth(of text: String? = nil) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [.font: font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)]
+        let longest = (text ?? string).components(separatedBy: "\n")
+            .map { ($0 as NSString).size(withAttributes: attributes).width }
+            .max() ?? 0
+        return ceil(longest) + textContainerInset.width * 2 + 2
     }
 
     /// Height the text needs at the current width, padding included.
@@ -563,9 +585,20 @@ extension NativeTextView {
             }, context: Unmanaged.passUnretained(editor).toOpaque())
         }
         var frame = placed.frame
+        // The column only widens once the typed text is written to the document
+        // (a beat later). Until then let the editor grow sideways to fit its
+        // longest line, or the new text wraps for a moment and snaps back. A cell
+        // that already wraps in the table (its column is at the width cap) keeps
+        // wrapping, since the column will not widen for it.
+        let fit = editor.requiredWidth()
+        let wrapsInTable = editor.requiredWidth(of: MarkdownStyler.expandCellLineBreaks(parsed.cell(row: session.row, column: session.column) ?? "")) > frame.width
+        if fit > frame.width, !wrapsInTable {
+            frame.size.width = min(fit, max(frame.width, placed.host.bounds.width - frame.minX))
+        }
         editor.frame = frame
         // Taller text pushes the editor's bottom edge down over the rows below.
         let needed = editor.requiredHeight()
+        session.outgrewCell = needed > placed.frame.height + 0.5
         if needed > frame.height {
             frame.size.height = needed
             editor.frame = frame

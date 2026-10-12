@@ -87,6 +87,12 @@ final class WideTableOverlay: NSScrollView {
         documentView = tableImageView
         tableImageView.ownerOverlay = self
 
+        // The cell editor sits over the table image, so it follows every scroll.
+        contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(contentDidScroll),
+            name: NSView.boundsDidChangeNotification, object: contentView
+        )
         NotificationCenter.default.addObserver(
             self, selector: #selector(scrollOffsetDidChange),
             name: NSScrollView.didLiveScrollNotification, object: self
@@ -138,6 +144,11 @@ final class WideTableOverlay: NSScrollView {
             contentView.scroll(to: NSPoint(x: max(0, newValue), y: 0))
             reflectScrolledClipView(contentView)
         }
+    }
+
+    @objc private func contentDidScroll() {
+        guard let owner = ownerTextView, owner.tableEditSession != nil else { return }
+        owner.layoutTableCellEditor()
     }
 
     @objc private func scrollOffsetDidChange() {

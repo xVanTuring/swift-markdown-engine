@@ -517,6 +517,14 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
             let coordinator = context.coordinator
             DispatchQueue.main.async { coordinator.isWikiLinkActive = false }
         }
+        // Sync in-place table editing. A flip changes whether tables render
+        // while the caret is in them, so the restyle below must redo them; the
+        // text view's configuration observer closes any open cell editor.
+        let editsTablesInPlaceChanged = context.coordinator.configuration.editsTablesInPlace != configuration.editsTablesInPlace
+        if editsTablesInPlaceChanged {
+            context.coordinator.configuration.editsTablesInPlace = configuration.editsTablesInPlace
+            textView.configuration.editsTablesInPlace = configuration.editsTablesInPlace
+        }
         // Sync the input-behavior toggles (auto-close pairs, list helpers).
         // The keystroke handlers read textView.configuration live, but only
         // makeNSView used to write it — an embedder settings change was inert
@@ -681,7 +689,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         context.coordinator.rebuildTextStorageAndStyle(
             textView,
             from: text,
-            invalidateLayout: isNodeSwitch || rawSourceModeChanged
+            invalidateLayout: isNodeSwitch || rawSourceModeChanged || editsTablesInPlaceChanged
         )
         textView.recalcOverscroll(for: nsView)
         (nsView as? ClampedScrollView)?.clampToInsets()

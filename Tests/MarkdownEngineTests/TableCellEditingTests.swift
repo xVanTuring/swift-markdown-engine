@@ -95,6 +95,30 @@ struct TableCellEditingTests {
         #expect(tv.tableEditSession?.editor.string == "1")
     }
 
+    @Test func typingPastTheCellWidthGrowsTheEditorInsteadOfWrapping() throws {
+        let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        let before = editor.frame
+        editor.insertText("a long run of typed text", replacementRange: NSRange(location: 0, length: 0))
+        #expect(editor.frame.width > before.width)
+        #expect(editor.frame.height == before.height)
+    }
+
+    /// An input method's composition that outgrows the cell grows the row at
+    /// once, and the write does not disturb the composition.
+    @Test func composingTextThatOutgrowsTheCellGrowsTheRow() throws {
+        let (tv, coordinator) = makeEditor(); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        let marked = String(repeating: "d ", count: 300)
+        editor.setMarkedText(marked, selectedRange: NSRange(location: marked.utf16.count, length: 0),
+                             replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(editor.hasMarkedText())
+        #expect(tv.string.contains("d d d d d d"))
+        #expect(tv.tableEditSession?.editor === editor)
+    }
+
     @Test func textTypedButNotYetWrittenSurvivesAnOperation() {
         let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
         #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
@@ -568,10 +592,11 @@ struct TableCellEditingTests {
 
         editor.setSelectedRange(NSRange(location: 1, length: 0))
         editor.insertText("\nsecond\nthird", replacementRange: editor.selectedRange())
-        // Not written yet: the write waits for typing to pause.
-        #expect(tv.string.contains("| 1 | 2 |"))
+        // Taller than the cell: written at once, so the row grows without a
+        // frame where the editor spills over the rows below.
+        #expect(tv.string.contains("| 1<br>second<br>third | 2 |"))
 
-        try await Task.sleep(nanoseconds: 500_000_000)
+        try await Task.sleep(nanoseconds: 200_000_000)
         #expect(tv.string.contains("| 1<br>second<br>third | 2 |"))
         // The table re-rendered taller and the editor followed its cell.
         #expect(editor.frame.height > heightBefore)
