@@ -145,11 +145,25 @@ extension NativeTextView {
         return first.frame.union(last.frame).insetBy(dx: -30, dy: -30).contains(point)
     }
 
+    /// Puts `view` above its siblings. A wide table's overlay spans the whole
+    /// row and is re-added when its table re-renders; anything beneath it never
+    /// sees the mouse.
+    func bringToFront(_ view: NSView, in host: NSView) {
+        guard view.superview !== host || host.subviews.last !== view else { return }
+        host.addSubview(view, positioned: .above, relativeTo: nil)
+    }
+
     /// Shows the grips for a cell (also the entry point for a wide table's overlay).
     func showTableGrips(tableStart: Int, row: Int, column: Int) {
         guard showsTableGrips, !isTrackingTableGrip else { return }
         if let state = tableGripState {
-            if state.tableStart == tableStart, state.row == row, state.column == column { return }
+            if state.tableStart == tableStart, state.row == row, state.column == column {
+                // An overlay re-added since the last layout may sit above the grips.
+                for grip in [state.columnGrip, state.rowGrip] {
+                    if let host = grip.superview { bringToFront(grip, in: host) }
+                }
+                return
+            }
             state.tableStart = tableStart
             state.row = row
             state.column = column
@@ -212,10 +226,15 @@ extension NativeTextView {
         let long = TableGripView.longSide, short = TableGripView.shortSide
 
         let columnFrame = columns.frames[state.column]
-        let columnGripFrame = NSRect(x: columnFrame.midX - long / 2, y: columnFrame.minY - short - 3,
+        // A table flush with its host's edge leaves no room outside; the grip
+        // then sits just inside the table, in the cell padding.
+        let hostBounds = columns.host.bounds
+        let columnGripFrame = NSRect(x: columnFrame.midX - long / 2,
+                                     y: max(columnFrame.minY - short - 3, hostBounds.minY + 1),
                                      width: long, height: short)
         let rowFrame = rows.frames[state.row]
-        let rowGripFrame = NSRect(x: rowFrame.minX - short - 3, y: rowFrame.midY - long / 2,
+        let rowGripFrame = NSRect(x: max(rowFrame.minX - short - 3, hostBounds.minX + 1),
+                                  y: rowFrame.midY - long / 2,
                                   width: short, height: long)
 
         place(state.columnGrip, axis: .column, index: state.column, frame: columnGripFrame,
@@ -237,7 +256,7 @@ extension NativeTextView {
             return
         }
         grip.isHidden = false
-        if grip.superview !== host { host.addSubview(grip) }
+        bringToFront(grip, in: host)
         grip.frame = frame
         grip.needsDisplay = true
         grip.window?.invalidateCursorRects(for: grip)
@@ -297,14 +316,7 @@ extension NativeTextView {
             guard let frames = lineFrames(axis, tableStart: tableStart), frames.host === host else { continue }
             let lowest = axis == .row ? 1 : 0
             let along = axis == .column ? point.x : point.y
-            var nearest = lowest
-            for (i, frame) in frames.frames.enumerated() where i >= lowest {
-                let mid = axis == .column ? frame.midX : frame.midY
-                let nearestFrame = frames.frames[nearest]
-                let nearestMid = axis == .column ? nearestFrame.midX : nearestFrame.midY
-                if abs(along - mid) < abs(along - nearestMid) { nearest = i }
-            }
-            target = nearest
+            target = Self.gripTarget(along: along, axis: axis, frames: frames.frames, lowest: lowest)
             showDropLine(axis: axis, from: from, target: target, frames: frames.frames, host: host)
         }
         if dragging { NSCursor.pop() }
@@ -320,6 +332,17 @@ extension NativeTextView {
             setTableSelection(tableStart: tableStart, selection)
         }
         updateGripSelectionHighlight()
+    }
+
+    /// The row / column the pointer is over (`along` is its x for columns, y for
+    /// rows); past either end it is the first / last one. Never below `lowest`.
+    static func gripTarget(along: CGFloat, axis: TableAxis, frames: [NSRect], lowest: Int) -> Int {
+        var target = lowest
+        for (i, frame) in frames.enumerated() where i >= lowest {
+            let start = axis == .column ? frame.minX : frame.minY
+            if along >= start { target = i }
+        }
+        return target
     }
 
     /// The line sits on the edge the dragged row / column will end up beside.
@@ -340,7 +363,7 @@ extension NativeTextView {
             let right = columnsExtent(host: host, tableStart: state.tableStart) ?? frame.maxX
             rect = NSRect(x: left, y: y - thickness / 2, width: right - left, height: thickness)
         }
-        if state.dropLine.superview !== host { host.addSubview(state.dropLine) }
+        bringToFront(state.dropLine, in: host)
         state.dropLine.frame = rect
         state.dropLine.needsDisplay = true
     }
