@@ -720,6 +720,16 @@ struct TableCellEditingTests {
         #expect(tv.tableSelectionState?.selection == TableCellSelection(rows: 0...2, columns: 2...2))
     }
 
+    @Test func gripTargetIsTheRowUnderThePointer() {
+        let rows = [NSRect(x: 0, y: 0, width: 50, height: 30), NSRect(x: 0, y: 32, width: 50, height: 70),
+                    NSRect(x: 0, y: 104, width: 50, height: 30)]
+        #expect(NativeTextView.gripTarget(along: -20, axis: .row, frames: rows, lowest: 1) == 1)
+        #expect(NativeTextView.gripTarget(along: 90, axis: .row, frames: rows, lowest: 1) == 1)
+        #expect(NativeTextView.gripTarget(along: 110, axis: .row, frames: rows, lowest: 1) == 2)
+        #expect(NativeTextView.gripTarget(along: 900, axis: .row, frames: rows, lowest: 1) == 2)
+        #expect(NativeTextView.gripTarget(along: 10, axis: .row, frames: rows, lowest: 0) == 0)
+    }
+
     @Test func theHeaderRowNeverMoves() throws {
         let (tv, coordinator) = makeEditor(Self.wide + "\n"); defer { withExtendedLifetime(coordinator) {} }
         tv.moveTableLine(tableStart: 0, axis: .row, from: 0, to: 2)

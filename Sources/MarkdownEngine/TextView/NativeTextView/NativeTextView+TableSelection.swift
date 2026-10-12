@@ -135,7 +135,7 @@ extension NativeTextView {
             return
         }
         view.isHidden = false
-        if view.superview !== first.host { first.host.addSubview(view) }
+        bringToFront(view, in: first.host)
         view.frame = frame
         view.needsDisplay = true
         updateGripSelectionHighlight()
