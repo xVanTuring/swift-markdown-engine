@@ -182,15 +182,15 @@ public struct SpellCheckingPolicy: Sendable {
     /// Mirrors `NSTextView.isAutomaticSpellingCorrectionEnabled`.
     public var automaticSpellingCorrection: Bool
     /// Mirrors `NSTextView.isAutomaticQuoteSubstitutionEnabled` (smart quotes).
-    /// Markdown/LaTeX source usually wants straight `'` and `"`, so embedders
-    /// editing plain source can turn this off.
+    /// Off by default: Markdown/LaTeX source wants straight `'` and `"`. Embedders
+    /// editing prose can turn it on.
     public var automaticQuoteSubstitution: Bool
 
     public init(
         continuousSpellChecking: Bool = true,
         grammarChecking: Bool = true,
         automaticSpellingCorrection: Bool = true,
-        automaticQuoteSubstitution: Bool = true
+        automaticQuoteSubstitution: Bool = false
     ) {
         self.continuousSpellChecking = continuousSpellChecking
         self.grammarChecking = grammarChecking
@@ -326,7 +326,7 @@ public struct ListStyle: Sendable {
     public var helpersEnabled: Bool
     /// Master switch for auto-closing pairs `()`, `{}`, `[]` while typing: it also
     /// covers stepping over a typed closer and wrapping a selection when an
-    /// opener or Markdown marker (`= * _ ~ ` $`) is typed over it.
+    /// opener or Markdown marker or quote (`= * _ ~ ` $ " '`) is typed over it.
     public var autoClosePairsEnabled: Bool
     /// When `true`, typing `[` right after a list marker (`- `) completes the
     /// checkbox as `- [ ] `; with auto-closing pairs off, typing `]` after
