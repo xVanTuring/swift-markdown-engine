@@ -1046,6 +1046,21 @@ struct TableWidthChangeRestyleTests {
         }
     }
 
+    @Test("A cell editor follows its table when the wide table is scrolled")
+    func cellEditorFollowsHorizontalScroll() throws {
+        let harness = try Harness(source: Self.proseTable)
+        defer { harness.close() }
+        let tv = harness.textView
+        let start = (tv.string as NSString).range(of: "| Heading0").location
+        #expect(tv.beginTableCellEditing(tableStart: start, row: 1, column: 1))
+        let editor = try #require(tv.tableEditSession?.editor)
+        let overlay = try #require(tv.wideTableOverlays.values.first)
+        let before = editor.frame.minX
+        overlay.horizontalOffset = 40
+        Harness.drain(mode: .default, duration: 0.1)
+        #expect(abs((before - editor.frame.minX) - overlay.horizontalOffset) < 1)
+    }
+
     @Test("Resizing without a cell editor still leaves the text below the table")
     func resizeWithoutEditorKeepsTextBelow() throws {
         let r = try resizeWithEditor(openEditor: false)
