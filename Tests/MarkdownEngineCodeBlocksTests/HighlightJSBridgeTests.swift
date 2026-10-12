@@ -135,10 +135,28 @@ struct HighlightJSBridgeTests {
         #expect(try color(of: token, in: code, language: language) == Self.foreground)
     }
 
-    @Test("An unknown language falls back to detection")
+    @Test("Without auto-detection, a fence with no language or an unknown one stays plain",
+          arguments: [nil, "", "no-such-language"] as [String?])
+    func noDetectionByDefault(language: String?) {
+        #expect(Self.bridge.highlight(code: "def f():\n    return 1", language: language) == nil)
+    }
+
+    @Test("Without auto-detection, a language's alias still highlights")
+    func aliasWithoutDetection() throws {
+        #expect(try color(of: "const", in: "const a = 1;", language: "js") == Self.keyword)
+    }
+
+    @Test("With auto-detection, an unknown language falls back to detection")
     func unknownLanguage() throws {
+        let bridge = HighlightJSBridge(lightTheme: Self.theme, darkTheme: Self.theme,
+                                       autoSwitchAppearance: false, autoDetectLanguage: true)
         let code = "def f():\n    return 1"
-        #expect(try color(of: "return", in: code, language: "no-such-language") == Self.keyword)
+        for language in [nil, "no-such-language"] as [String?] {
+            let highlighted = try #require(bridge.highlight(code: code, language: language))
+            let range = (code as NSString).range(of: "return")
+            #expect(highlighted.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
+                    == Self.keyword)
+        }
     }
 
     @Test("An embedded language is coloured")

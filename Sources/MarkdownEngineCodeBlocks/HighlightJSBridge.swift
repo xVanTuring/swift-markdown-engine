@@ -47,6 +47,7 @@ public final class HighlightJSBridge: SyntaxHighlighter, @unchecked Sendable {
     private let lightBackground: NSColor
     private let darkBackground: NSColor
     private let preferredFontNames: [String]
+    private let autoDetectLanguage: Bool
 
     // A JSContext must not run two scripts at once.
     private let lock = NSLock()
@@ -64,15 +65,22 @@ public final class HighlightJSBridge: SyntaxHighlighter, @unchecked Sendable {
     ///     to use `darkTheme.background` instead.
     ///   - preferredFontNames: PostScript font names tried in order before
     ///     falling back to the system monospace font.
+    ///   - autoDetectLanguage: When `true`, a fence with no language (or one
+    ///     highlight.js doesn't know) is run through `highlightAuto`, which tries
+    ///     every bundled language and takes 0.3–0.6 s for ~60 lines on the main
+    ///     thread. Defaults to `false`: such blocks stay plain code (the call
+    ///     returns `nil`).
     public init(
         lightTheme: CodeHighlightTheme = .githubLight,
         darkTheme: CodeHighlightTheme = .githubDark,
         autoSwitchAppearance: Bool = true,
         lightBackground: NSColor? = NSColor(calibratedWhite: 0.95, alpha: 1.0),
         darkBackground: NSColor? = NSColor(calibratedWhite: 0.13, alpha: 1.0),
-        preferredFontNames: [String] = ["SF Mono", "Menlo"]
+        preferredFontNames: [String] = ["SF Mono", "Menlo"],
+        autoDetectLanguage: Bool = false
     ) {
         self.highlightJS = HighlightJS()
+        self.autoDetectLanguage = autoDetectLanguage
         self.lightTheme = lightTheme
         self.darkTheme = darkTheme
         self.autoSwitchAppearance = autoSwitchAppearance
@@ -140,7 +148,10 @@ public final class HighlightJSBridge: SyntaxHighlighter, @unchecked Sendable {
         }
 
         lock.lock()
-        let tokens = highlightJS.tokens(in: code, language: name)
+        // Without auto-detection, only a language highlight.js knows (aliases
+        // included: `js`, `sh`) is highlighted; anything else stays plain.
+        let highlights = autoDetectLanguage || (!name.isEmpty && highlightJS.knows(language: name))
+        let tokens = highlights ? highlightJS.tokens(in: code, language: name) : nil
         lock.unlock()
         guard let tokens else { return nil }
 
@@ -181,6 +192,8 @@ private final class HighlightJS {
 
     private let context: JSContext
     private let tokenize: JSValue
+    /// `hljs.getLanguage` per name already asked about.
+    private var knownLanguages: [String: Bool] = [:]
 
     // Walks `_emitter.rootNode`, the tree highlight.js renders its HTML from:
     // its leaves are the unescaped source, so offsets are UTF-16 offsets into
@@ -278,6 +291,17 @@ private final class HighlightJS {
         }
         self.context = context
         self.tokenize = tokenize
+    }
+
+    /// Whether highlight.js has `language`, by name or alias.
+    func knows(language: String) -> Bool {
+        if let known = knownLanguages[language] { return known }
+        context.exception = nil
+        let found = context.objectForKeyedSubscript("hljs")?
+            .invokeMethod("getLanguage", withArguments: [language])
+        let known = context.exception == nil && found.map { !$0.isUndefined && !$0.isNull } == true
+        knownLanguages[language] = known
+        return known
     }
 
     /// Scoped runs of `code`, or `nil` when highlight.js failed. Text outside every scope is left out.

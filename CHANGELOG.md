@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SpellCheckingPolicy.automaticQuoteSubstitution` now defaults to `false`: straight `'` and `"` stay straight. Set it to `true` to get smart quotes back.
 - **Table right-click menu moved to the embedder.** The table editor no longer ships a menu of its own; without the hook, a right-click shows only the plain text menu. A right-click on a table cell hands your `onTableCellContextMenu` hook the editor's own menu plus a `TableCellMenuContext` — the open cell, the row and column counts, the column's alignment, and which `TableEditOperation`s apply (`context.isEnabled(_:)` carries the engine's rules) — and your app builds and localizes the items; `context.perform(_:)` runs one as a single undoable edit. The engine's bundled en/zh-Hans titles and their resource bundle are gone; the demo builds its own English menu through the hook.
 
+- **`HighlightJSBridge` no longer guesses the language by default.** A fence with no language, or one highlight.js doesn't know, now stays plain code; auto-detection tries every bundled language and took 0.3–0.6 s for ~60 lines. Pass `autoDetectLanguage: true` to get the guessing back.
+
 ### Fixed
 - An image pasted with ⌘V goes in as `![[Name]]` with its id beside the text, like a link inserted any other way; with its source showing, the `|<id>` used to show.
 - Copied links keep their ids: a copy carries the text as stored (`[[Name|id]]`) in the private flavor, and our paste puts it back in its display form with the id on `.wikiLinkID`. Copied links used to come back name-only (`[[Name]]`) and broke on the next rename. Other apps still get the text as shown.
