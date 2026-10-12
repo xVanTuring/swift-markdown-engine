@@ -36,6 +36,7 @@ public final class HighlighterSwiftBridge: SyntaxHighlighter, @unchecked Sendabl
     private let lightBackground: NSColor
     private let darkBackground: NSColor
     private let preferredFontNames: [String]
+    private let autoDetectLanguage: Bool
     private var currentTheme: String = ""
 
     // HighlighterSwift's JavaScriptCore bridge is expensive — cache by (theme, language, code).
@@ -54,15 +55,21 @@ public final class HighlighterSwiftBridge: SyntaxHighlighter, @unchecked Sendabl
     ///     to use HighlighterSwift's CSS-theme background instead.
     ///   - preferredFontNames: PostScript font names tried in order before
     ///     falling back to the system monospace font.
+    ///   - autoDetectLanguage: When `true`, a fence with no language (or an
+    ///     unknown one) is run through highlight.js auto-detection, which tries
+    ///     every bundled language and takes 0.3–0.6 s for ~60 lines. Defaults to
+    ///     `false`: such blocks are left as plain code (the call returns `nil`).
     public init(
         lightTheme: String = "atom-one-light",
         darkTheme: String = "atom-one-dark",
         autoSwitchAppearance: Bool = true,
         lightBackground: NSColor? = NSColor(calibratedWhite: 0.95, alpha: 1.0),
         darkBackground: NSColor? = NSColor(calibratedWhite: 0.13, alpha: 1.0),
-        preferredFontNames: [String] = ["SF Mono", "Menlo"]
+        preferredFontNames: [String] = ["SF Mono", "Menlo"],
+        autoDetectLanguage: Bool = false
     ) {
         self.highlighter = Highlighter()
+        self.autoDetectLanguage = autoDetectLanguage
         self.lightTheme = lightTheme
         self.darkTheme = darkTheme
         self.autoSwitchAppearance = autoSwitchAppearance
@@ -155,11 +162,11 @@ public final class HighlighterSwiftBridge: SyntaxHighlighter, @unchecked Sendabl
         if let lang = explicit, !skipExplicit {
             highlighted = highlighter.highlight(code, as: lang)
             if highlighted == nil {
-                // Unknown language — remember and fall back to auto-detect.
+                // Unknown language — remember it so it is never retried.
                 unsupportedLanguages.insert(lang)
-                highlighted = highlighter.highlight(code)
+                if autoDetectLanguage { highlighted = highlighter.highlight(code) }
             }
-        } else {
+        } else if autoDetectLanguage {
             highlighted = highlighter.highlight(code)
         }
 
