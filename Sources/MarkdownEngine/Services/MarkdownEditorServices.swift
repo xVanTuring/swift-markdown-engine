@@ -343,19 +343,29 @@ public struct MarkdownEditorServices: Sendable {
     public var syntaxHighlighter: any SyntaxHighlighter
     public var latex: any LatexRenderer
     public var bus: MarkdownEditorBus
+    /// Draws fenced code blocks of the embedder's own languages as images. No language by default.
+    public var fencedBlocks: any FencedBlockRenderer
 
     public init(
         wikiLinks: any WikiLinkResolver = NoOpWikiLinkResolver(),
         images: any EmbeddedImageProvider = NoOpEmbeddedImageProvider(),
         syntaxHighlighter: any SyntaxHighlighter = PlainTextSyntaxHighlighter(),
         latex: any LatexRenderer = NoOpLatexRenderer(),
-        bus: MarkdownEditorBus = .default
+        bus: MarkdownEditorBus = .default,
+        fencedBlocks: any FencedBlockRenderer = NoOpFencedBlockRenderer()
     ) {
         self.wikiLinks = wikiLinks
         self.images = images
         self.syntaxHighlighter = syntaxHighlighter
         self.latex = latex
         self.bus = bus
+        self.fencedBlocks = fencedBlocks
+    }
+
+    /// Everything that changes the size of what is laid out (embedded images and fenced-block images): the editor
+    /// re-measures its layout when this changes.
+    func layoutFingerprint() -> AnyHashable {
+        AnyHashable([images.fingerprint(), fencedBlocks.fingerprint()])
     }
 
     public static let `default` = MarkdownEditorServices()
