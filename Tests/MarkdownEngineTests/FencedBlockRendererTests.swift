@@ -122,6 +122,33 @@ struct FencedBlockRendererTests {
         #expect(imageAnchors(in: try styled(text, caret: (text as NSString).length, renderer: none)).isEmpty)
     }
 
+    @Test("the drawn image's frame can be queried for an overlay")
+    func reportsTheFrameOfTheDrawnImage() throws {
+        _ = NSApplication.shared
+        let storage = try styled(text, caret: (text as NSString).length)
+        var config = MarkdownEditorConfiguration.default
+        config.services = MarkdownEditorServices(fencedBlocks: StubRenderer())
+        let tv = NativeTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        tv.configuration = config
+        tv.textContainer?.size = NSSize(width: 600, height: CGFloat.greatestFiniteMagnitude)
+        tv.textStorage?.setAttributedString(storage)
+        // The editor installs this delegate itself; without it the fragments are plain AppKit ones.
+        let tlm = try #require(tv.textLayoutManager)
+        let delegate = MarkdownLayoutManagerDelegate()
+        tlm.delegate = delegate
+        tlm.invalidateLayout(for: tlm.documentRange)
+        let frames = withExtendedLifetime(delegate) { tv.renderedBlockFrames() }
+        #expect(frames.count == 1)
+        let item = try #require(frames.first)
+        #expect(item.anchor.location == (text as NSString).range(of: "surface").location)
+        #expect(item.frame.size == CGSize(width: 200, height: 120))
+        // Centered in the 600pt column.
+        #expect(abs(item.frame.midX - 300) < 12)
+        // Below the intro paragraph, above the trailing one.
+        #expect(item.frame.minY > 10)
+        #expect(item.frame.maxY < tv.frame.height + 400)
+    }
+
     @Test("the layout fingerprint follows the renderer's")
     func fingerprintIsFolded() {
         var a = MarkdownEditorServices(fencedBlocks: StubRenderer())

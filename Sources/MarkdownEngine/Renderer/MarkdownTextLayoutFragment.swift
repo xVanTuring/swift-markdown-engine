@@ -586,8 +586,13 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
     /// `point`.  Used by `renderingSurfaceBounds` (with `.zero`) to extend
     /// the surface so images drawn in paragraphSpacing aren't clipped.
     private func blockImageRects(at point: CGPoint) -> [CGRect] {
+        blockImageFrames(at: point).map(\.rect)
+    }
+
+    /// Like `blockImageRects`, with the character range (the anchor run) each image hangs on.
+    func blockImageFrames(at point: CGPoint) -> [(range: NSRange, rect: CGRect)] {
         guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return [] }
-        var rects: [CGRect] = []
+        var rects: [(range: NSRange, rect: CGRect)] = []
         ts.enumerateAttribute(.latexImage, in: range, options: []) { value, attrRange, _ in
             guard value is NSImage else { return }
             let isBlock = ts.attribute(.latexIsBlock, at: attrRange.location, effectiveRange: nil) as? Bool ?? false
@@ -600,7 +605,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
             let imageBounds = boundsVal?.rectValue ?? .zero
             let blockOffsetY = ts.attribute(.latexBlockOffsetY, at: attrRange.location, effectiveRange: nil) as? CGFloat
             if let rect = blockImageDrawRect(attrRange: attrRange, imageBounds: imageBounds, blockOffsetY: blockOffsetY, point: point) {
-                rects.append(rect)
+                rects.append((attrRange, rect))
             }
         }
         return rects
