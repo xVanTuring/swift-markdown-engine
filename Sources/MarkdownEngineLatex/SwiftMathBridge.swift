@@ -177,7 +177,9 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
     /// Stable filename for a cache key: SHA-256 of the fingerprinting fields, hex.
     private func diskFilename(for key: CacheKey) -> String {
         let mode = key.mode == .display ? "display" : "inline"
-        let composite = "\(key.latex)|\(mode)|\(key.fontSize)|\(key.isDarkMode)|\(key.lightColorRGB)|\(key.darkColorRGB)"
+        // `v2`: images are now sized by their ink, not only by SwiftMath's ascent/descent —
+        // entries written before that are cut off at the bottom and must not be reused.
+        let composite = "v2|\(key.latex)|\(mode)|\(key.fontSize)|\(key.isDarkMode)|\(key.lightColorRGB)|\(key.darkColorRGB)"
         let digest = SHA256.hash(data: Data(composite.utf8))
         return digest.map { String(format: "%02x", $0) }.joined() + ".mathcache"
     }
@@ -310,26 +312,42 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         let canvasHeight = exactHeight + paddingBottom
 
         // `displayList.width` is the advance width, which excludes the right-side ink
-        // overhang of slanted glyphs (V, Y, P, F, …) — cropping to it clips them.
-        // Render with right slack, then crop to the measured ink edge.
+        // overhang of slanted glyphs (V, Y, P, F, …), and its ascent/descent run short
+        // of the ink too — subscripts (`a_n`, `\lim_{n\to\infty}`) hang below the
+        // reported descent. Cropping to those numbers clips the glyphs, so render with
+        // slack on the right, top and bottom, then crop to the measured ink.
         let rightSlack = ceil(fontSize)
+        let vSlack = ceil(fontSize * 0.5)
         let probeWidth = ceil(exactWidth) + rightSlack
+        let probeHeight = canvasHeight + 2 * vSlack
 
-        guard let probeRep = renderLabelToRep(mathLabel, size: CGSize(width: probeWidth, height: canvasHeight)),
+        // The label centres the formula in what the insets leave, i.e. in the same
+        // `canvasHeight` band as before, now sitting `vSlack` inside the probe.
+        mathLabel.contentInsets = MTEdgeInsets(top: vSlack, left: 0, bottom: vSlack, right: 0)
+        defer { mathLabel.contentInsets = MTEdgeInsets() }
+
+        guard let probeRep = renderLabelToRep(mathLabel, size: CGSize(width: probeWidth, height: probeHeight)),
               let probeCG = probeRep.cgImage else {
             return nil
         }
 
-        let inkRight = Self.inkRightEdge(probeCG, widthInPoints: probeWidth) ?? exactWidth
-        let finalWidth = max(ceil(exactWidth), ceil(inkRight))
-        let finalSize = CGSize(width: finalWidth, height: canvasHeight)
+        let ink = Self.inkBounds(probeCG, sizeInPoints: CGSize(width: probeWidth, height: probeHeight))
+        let finalWidth = max(ceil(exactWidth), ceil(ink?.right ?? exactWidth))
+        // Whole points, so the crop lands on pixel rows at any backing scale.
+        let extraTop = max(0, min(vSlack, ceil(vSlack - (ink?.top ?? vSlack))))
+        let extraBottom = max(0, min(vSlack, ceil((ink?.bottom ?? 0) - (vSlack + canvasHeight))))
+        let finalSize = CGSize(width: finalWidth, height: canvasHeight + extraTop + extraBottom)
 
-        // Crop to the measured width (full height kept); points→pixels via the rep,
-        // so this is correct at any backing scale.
+        // Points→pixels via the rep, so this is correct at any backing scale.
         let pxPerPoint = CGFloat(probeCG.width) / probeWidth
-        let cropPx = min(probeCG.width, Int((finalWidth * pxPerPoint).rounded()))
-        guard cropPx > 0,
-              let croppedCG = probeCG.cropping(to: CGRect(x: 0, y: 0, width: cropPx, height: probeCG.height)) else {
+        let cropRect = CGRect(
+            x: 0,
+            y: ((vSlack - extraTop) * pxPerPoint).rounded(),
+            width: min(CGFloat(probeCG.width), (finalWidth * pxPerPoint).rounded()),
+            height: (finalSize.height * pxPerPoint).rounded()
+        )
+        guard cropRect.width > 0, cropRect.height > 0,
+              let croppedCG = probeCG.cropping(to: cropRect) else {
             return nil
         }
 
@@ -341,7 +359,7 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         return CacheEntry(
             image: image,
             size: finalSize,
-            baselineOffset: displayList.descent
+            baselineOffset: displayList.descent + extraBottom
         )
     }
 
@@ -358,12 +376,14 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         return rep
     }
 
-    /// Right-most x (in points) containing non-transparent ink, or `nil` if empty —
-    /// lets us crop a formula to its true ink width instead of the advance width.
-    private static func inkRightEdge(_ image: CGImage, widthInPoints: CGFloat) -> CGFloat? {
+    /// Edges (in points, y from the top) of the non-transparent ink, or `nil` if empty —
+    /// lets us crop a formula to its true ink instead of its typographic box.
+    private static func inkBounds(
+        _ image: CGImage, sizeInPoints: CGSize
+    ) -> (right: CGFloat, top: CGFloat, bottom: CGFloat)? {
         let w = image.width
         let h = image.height
-        guard w > 0, h > 0, widthInPoints > 0 else { return nil }
+        guard w > 0, h > 0, sizeInPoints.width > 0, sizeInPoints.height > 0 else { return nil }
 
         let bytesPerRow = w * 4
         var data = [UInt8](repeating: 0, count: bytesPerRow * h)
@@ -377,19 +397,33 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         }
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
 
-        // Scan each row from the right, stopping once we pass the running max.
+        // Rows are stored top first. Scan each from the right, stopping once we
+        // pass the running max; a row with any ink at all also bounds top/bottom.
         var maxX = -1
+        var minY = -1
+        var maxY = -1
         for y in 0..<h {
             let row = y * bytesPerRow
             var x = w - 1
-            while x > maxX {
-                if data[row + x * 4 + 3] > 10 { maxX = x; break }
+            var rowHasInk = false
+            while x >= 0 {
+                if data[row + x * 4 + 3] > 10 {
+                    rowHasInk = true
+                    if x > maxX { maxX = x }
+                    break
+                }
                 x -= 1
+            }
+            if rowHasInk {
+                if minY < 0 { minY = y }
+                maxY = y
             }
         }
         guard maxX >= 0 else { return nil }
 
-        // +1: pixel `maxX` spans [maxX, maxX+1). Convert to points.
-        return (CGFloat(maxX) + 1) * widthInPoints / CGFloat(w)
+        // +1: pixel `n` spans [n, n+1). Convert to points.
+        let sx = sizeInPoints.width / CGFloat(w)
+        let sy = sizeInPoints.height / CGFloat(h)
+        return ((CGFloat(maxX) + 1) * sx, CGFloat(minY) * sy, (CGFloat(maxY) + 1) * sy)
     }
 }
