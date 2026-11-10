@@ -197,12 +197,27 @@ extension MarkdownStyler {
                         }
                     }
 
+                    // The formula image is drawn over the line, it is not a glyph, so by
+                    // itself it lends the line no height: a fraction or a `\lim` subscript
+                    // ran into the next line, and on the last line was cut off by the view.
+                    // The two hidden `$` carry the image's extent instead — raised to its
+                    // top and dropped to its bottom — so the line box grows to hold it.
+                    let textScale = latexFontSize / ctx.baseFont.pointSize
+                    let textAscent = ctx.baseFont.ascender * textScale
+                    let textDescent = -ctx.baseFont.descender * textScale
+                    let formulaDescent = entry.baselineOffset
+                    let formulaAscent = entry.size.height - formulaDescent
+
                     let openMarker = token.markerRanges[0]
-                    attrs.append((openMarker, [
+                    var openAttrs: [NSAttributedString.Key: Any] = [
                         .font: ctx.latexMarkerFont,
                         .foregroundColor: NSColor.clear,
                         .kern: -tinyDollarWidth
-                    ]))
+                    ]
+                    if formulaAscent > textAscent {
+                        openAttrs[.baselineOffset] = formulaAscent - ctx.latexMarkerFont.ascender
+                    }
+                    attrs.append((openMarker, openAttrs))
                     // Hidden by SIZE like the rest of the source, not only by a clear colour:
                     // NSTextView.selectedTextAttributes carries a `selectedTextColor` that
                     // repaints selected glyphs opaque, so a full-size `$` came back under the
@@ -210,12 +225,11 @@ extension MarkdownStyler {
                     // lend the line its text descent; dropping it by that descent does the same,
                     // so a line holding only the formula keeps the baseline of one with text.
                     let closeMarker = token.markerRanges[1]
-                    let textDescent = -ctx.baseFont.descender * latexFontSize / ctx.baseFont.pointSize
                     attrs.append((closeMarker, [
                         .font: ctx.latexMarkerFont,
                         .foregroundColor: NSColor.clear,
                         .kern: -tinyDollarWidth,
-                        .baselineOffset: -textDescent
+                        .baselineOffset: -max(textDescent, formulaDescent)
                     ]))
                 } else {
                     for markerRange in token.markerRanges {
