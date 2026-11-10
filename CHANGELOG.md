@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`HighlighterSwiftBridge` no longer guesses the language by default.** A fence with no language, or one highlight.js doesn't know, now stays plain code; auto-detection tries every bundled language and took 0.3–0.6 s for ~60 lines. Pass `autoDetectLanguage: true` to get the guessing back.
 
 ### Fixed
+- Inline `$…$` formulas are no longer cut off. Subscripts (`a_n`, `\lim_{n\to\infty}`) lost their bottom rows because the image was cropped to SwiftMath's descent, which runs short of the ink; the image is now sized by its measured ink. A formula taller than the text (a fraction) ran into the next line, and on the last line was clipped by the view; it now grows the line it sits on.
 - Tables no longer overlap the text below them after the window edge is dragged several times; the table layout is refreshed once the text container catches up with the new width.
 - Switching documents drops AppKit's blue autocorrection underline; it stood over the incoming document, and its range moved into the new text.
 - Smart paste keeps tables, lists and headings that arrive wrapped in elements the converter doesn't know (Gemini's `<response-element>`/`<table-block>` web components, `<section>`, a Google Docs `<b>` wrapper); they used to collapse into one line of text.
