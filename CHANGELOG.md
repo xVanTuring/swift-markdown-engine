@@ -106,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `convert(_:to:)` instead.
 
 ### Fixed
+- Inline `$…$` formulas are no longer cut off. Subscripts (`a_n`, `\lim_{n\to\infty}`) lost their bottom rows because the image was cropped to SwiftMath's descent, which runs short of the ink; the image is now sized by its measured ink. A formula taller than the text (a fraction) ran into the next line, and on the last line was clipped by the view; it now grows the line it sits on.
 - Tables no longer overlap the text below them after the window edge is dragged several times; the table layout is refreshed once the text container catches up with the new width.
 - Switching documents drops AppKit's blue autocorrection underline; it stood over the incoming document, and its range moved into the new text.
 - A configured bottom safe-area inset (`safeAreaInsets.bottom`) survives `recalcOverscroll`; it was reset to 0 on every pass, so the gap left for a control above the editor went missing.
