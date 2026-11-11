@@ -367,6 +367,16 @@ struct InlineParserTests {
         #expect(spans(#"$x>0 \text{且} y>0$"#).latex == [#"$x>0 \text{且} y>0$"#])
     }
 
+    @Test("Chinese as a subscript or superscript is math, beside it is not")
+    func cjkScriptsAreLatex() {
+        #expect(spans("若$[X]_补$=1.1101010，则$[X]_原$=( )。").latex == ["$[X]_补$", "$[X]_原$"])
+        for source in ["$x_{补码}$", "$a^{上}$", #"$[X]_{\text{补}}$"#, "$[X]_补 = 1.01$", "$x_补码$", #"$\mathrm{补}$"#] {
+            #expect(spans(source).latex == [source], "\(source)")
+        }
+        #expect(spans("$x_1 和 y$").latex.isEmpty)
+        #expect(spans("$a_{1} 用**常数**系数 $").latex.isEmpty)
+    }
+
     @Test("one formula the heuristic misses no longer pairs the rest across Chinese prose")
     func chineseSentenceWithPrimes() {
         let source = #"它把 $y$、$y'$、$y''$ 用**常数**系数拼起来。这就要求 $y'$、$y''$ 和 $y$ 是"同一类东西""#
