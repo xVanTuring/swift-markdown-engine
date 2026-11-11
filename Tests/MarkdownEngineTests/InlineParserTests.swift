@@ -377,6 +377,17 @@ struct InlineParserTests {
         #expect(spans("$a_{1} 用**常数**系数 $").latex.isEmpty)
     }
 
+    @Test("variables listed with commas are math, prose with commas is not")
+    func nameListsAreLatex() {
+        #expect(spans("若 $x, y$ 和 $z$ 为无符号整数，则 $z < x < y$").latex == ["$x, y$", "$z$", "$z < x < y$"])
+        for source in ["$a,b,c$", "$x1, x2$", "$y', z$", "$AB, CD$", "$m , n$"] {
+            #expect(spans(source).latex == [source], "\(source)")
+        }
+        for source in ["$5, and $", "$ok, so I$", "$x,$", "$, y$", "$x, 1$", "$abcd, e$"] {
+            #expect(spans(source).latex.isEmpty, "\(source)")
+        }
+    }
+
     @Test("one formula the heuristic misses no longer pairs the rest across Chinese prose")
     func chineseSentenceWithPrimes() {
         let source = #"它把 $y$、$y'$、$y''$ 用**常数**系数拼起来。这就要求 $y'$、$y''$ 和 $y$ 是"同一类东西""#
