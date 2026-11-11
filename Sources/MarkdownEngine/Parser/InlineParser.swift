@@ -598,6 +598,7 @@ enum InlineParser {
         let mathyMatches = mathyCharCount(trimmed)
         if mathyMatches == 0 {
             return (trimmed.count <= 3 && isAllAsciiLetters(trimmed)) || isPrimed(trimmed) || isFunctionNotation(trimmed)
+                || isNameList(trimmed)
         }
         let tokenCount = trimmed.split(whereSeparator: { $0.isWhitespace }).count
         if mathyMatches >= 3 { return tokenCount <= 120 }
@@ -663,6 +664,23 @@ enum InlineParser {
         guard (1...3).contains(i), i < u.count else { return false }
         while i < u.count, u[i] == 0x27 { i += 1 }
         return i == u.count
+    }
+
+    /// Variables listed with commas — `x, y`, `a,b,c`, `x1, x2`, `y', z` — as running text names them
+    /// (`若 $x, y$ 和 $z$ 为整数`). Two or more items, each 1–3 ASCII letters then optional digits and
+    /// primes, nothing else: prose such as `$5, and $` or `$ok, so I$` stays literal.
+    private static func isNameList(_ s: String) -> Bool {
+        let items = s.split(separator: ",", omittingEmptySubsequences: false)
+        guard items.count >= 2 else { return false }
+        return items.allSatisfy { item in
+            let u = Array(item.trimmingCharacters(in: .whitespaces).utf16)
+            var i = 0
+            while i < u.count, isAsciiLetter(u[i]) { i += 1 }
+            guard (1...3).contains(i) else { return false }
+            while i < u.count, u[i] >= 0x30, u[i] <= 0x39 { i += 1 }
+            while i < u.count, u[i] == 0x27 { i += 1 }
+            return i == u.count
+        }
     }
 
     /// CJK text outside a `\text{…}`-style group and outside a sub/superscript. Both are how CJK is
