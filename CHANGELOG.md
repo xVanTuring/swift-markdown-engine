@@ -106,6 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `convert(_:to:)` instead.
 
 ### Fixed
+- Chinese / Japanese / Korean inside a formula is drawn. SwiftMath's parser drops every character outside ASCII, so `[X]_补` came out as `[X]` and `x>0 \text{且} y>0` as `x>0 y>0`; `SwiftMathBridge` now parses each CJK character as a stand-in SwiftMath keeps and puts the character back afterwards, and Core Text draws it in a system CJK font. A script still takes one token, as in TeX: `_{补码}` subscripts both characters, `_补码` only `补`. Formula images cached before this are not reused.
+- Inline `$…$` accepts CJK written as a subscript or superscript (`$[X]_补$`, `$x_{补码}$`, `$a^{上}$`) and inside `\mathrm{…}`, as well as inside `\text{…}` as before; CJK anywhere else still keeps a `$…$` from being math, so a sentence between two stray dollars stays prose.
 - Inline `$…$` formulas are no longer cut off. Subscripts (`a_n`, `\lim_{n\to\infty}`) lost their bottom rows because the image was cropped to SwiftMath's descent, which runs short of the ink; the image is now sized by its measured ink. A formula taller than the text (a fraction) ran into the next line, and on the last line was clipped by the view; it now grows the line it sits on.
 - Tables no longer overlap the text below them after the window edge is dragged several times; the table layout is refreshed once the text container catches up with the new width.
 - Switching documents drops AppKit's blue autocorrection underline; it stood over the incoming document, and its range moved into the new text.
