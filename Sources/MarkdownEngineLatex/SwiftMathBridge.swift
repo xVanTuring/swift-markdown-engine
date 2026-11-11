@@ -179,7 +179,8 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         let mode = key.mode == .display ? "display" : "inline"
         // `v2`: images are now sized by their ink, not only by SwiftMath's ascent/descent —
         // entries written before that are cut off at the bottom and must not be reused.
-        let composite = "v2|\(key.latex)|\(mode)|\(key.fontSize)|\(key.isDarkMode)|\(key.lightColorRGB)|\(key.darkColorRGB)"
+        // `v3`: CJK characters are drawn (`standInsForCJK`); earlier entries left them out.
+        let composite = "v3|\(key.latex)|\(mode)|\(key.fontSize)|\(key.isDarkMode)|\(key.lightColorRGB)|\(key.darkColorRGB)"
         let digest = SHA256.hash(data: Data(composite.utf8))
         return digest.map { String(format: "%02x", $0) }.joined() + ".mathcache"
     }
@@ -227,38 +228,111 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
     /// in Debug builds; release builds drop the spacing). A sign settled here as unary stays so
     /// through `finalized`, which only ever turns binary into unary.
     static func settleBinarySigns(in list: MTMathList?) {
+        forEachList(in: list) { list in
+            var prev: MTMathAtom?
+            for atom in list.atoms {
+                if atom.type == .space || atom.type == .style { continue }   // glue, not an atom, to TeX
+                switch atom.type {
+                case .binaryOperator:
+                    if prev.map({ [.binaryOperator, .relation, .open, .punctuation, .largeOperator].contains($0.type) }) ?? true {
+                        atom.type = .unaryOperator
+                    }
+                case .relation, .punctuation, .close:
+                    if let p = prev, p.type == .binaryOperator { p.type = .unaryOperator }
+                default:
+                    break
+                }
+                prev = atom
+            }
+            if let p = prev, p.type == .binaryOperator { p.type = .unaryOperator }
+        }
+    }
+
+    /// SwiftMath's parser drops every character outside ASCII (Cyrillic and accented Latin aside), so
+    /// `[X]_补` came out as `[X]` and `x>0 \text{且} y>0` as `x>0 y>0`. Each CJK character goes to the
+    /// parser as a Cyrillic letter the formula doesn't use instead — SwiftMath keeps that as an ordinary
+    /// atom — and `restoreCJK` puts the character back into the atom; Core Text then draws it in a system
+    /// CJK font (font fallback). One stand-in per character, so a script takes one token as in TeX:
+    /// `_补码` subscripts only `补`. Characters beyond the 64 stand-ins stay as they were (dropped).
+    static func standInsForCJK(_ latex: String) -> (latex: String, originals: [String: String]) {
+        guard latex.unicodeScalars.contains(where: { isCJK($0.value) }) else { return (latex, [:]) }
+        let used = Set(latex.unicodeScalars)
+        var pool = (UInt32(0x0410)...UInt32(0x044F)).compactMap(Unicode.Scalar.init).filter { !used.contains($0) }
+        pool.reverse()   // so `popLast` hands them out in order
+        var standIn: [Unicode.Scalar: Unicode.Scalar] = [:]
+        var originals: [String: String] = [:]
+        var out = String.UnicodeScalarView()
+        // SwiftMath reads a command name as every cased letter that follows the backslash, Cyrillic
+        // included: `\quad时` must go in as `\quad Л`, or it parses as the unknown command `\quadЛ`.
+        var afterBackslash = false, inControlWord = false
+        for s in latex.unicodeScalars {
+            if isCJK(s.value), let c = standIn[s] ?? pool.popLast() {
+                standIn[s] = c
+                originals[String(c)] = String(s)
+                if inControlWord { out.append(" ") }
+                out.append(c)
+                afterBackslash = false; inControlWord = false
+                continue
+            }
+            out.append(s)
+            let asciiLetter = s.isASCII && s.properties.isAlphabetic
+            if afterBackslash {
+                afterBackslash = false
+                inControlWord = asciiLetter   // `\\` and `\,` are one-character commands
+            } else if s == "\\" {
+                afterBackslash = true; inControlWord = false
+            } else {
+                inControlWord = inControlWord && asciiLetter
+            }
+        }
+        return (String(out), originals)
+    }
+
+    /// Puts back the characters `standInsForCJK` replaced, in every list of the parsed formula.
+    static func restoreCJK(in list: MTMathList?, _ originals: [String: String]) {
+        guard !originals.isEmpty else { return }
+        forEachList(in: list) { list in
+            for atom in list.atoms {
+                if let original = originals[atom.nucleus] { atom.nucleus = original }
+            }
+        }
+    }
+
+    /// Han, kana, Hangul, and the CJK / full-width punctuation that goes with them — the same ranges
+    /// as the parser's `InlineParser.isCJK`, which decides what may sit inside a formula.
+    private static func isCJK(_ v: UInt32) -> Bool {
+        switch v {
+        case 0x1100...0x11FF, 0x2E80...0x2FFF, 0x3000...0x303F, 0x3040...0x31FF, 0x3200...0x4DBF,
+             0x4E00...0x9FFF, 0xA960...0xA97F, 0xAC00...0xD7FF, 0xF900...0xFAFF, 0xFE30...0xFE4F,
+             0xFF00...0xFFEF, 0x20000...0x3FFFF:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Calls `body` on `list` and on every list nested in it: scripts, fraction parts, radicand and
+    /// degree, inner / over / under / accent / colour groups, table cells.
+    static func forEachList(in list: MTMathList?, _ body: (MTMathList) -> Void) {
         guard let list else { return }
-        var prev: MTMathAtom?
+        body(list)
         for atom in list.atoms {
-            settleBinarySigns(in: atom.subScript)
-            settleBinarySigns(in: atom.superScript)
+            forEachList(in: atom.subScript, body)
+            forEachList(in: atom.superScript, body)
             switch atom {
-            case let a as MTFraction: settleBinarySigns(in: a.numerator); settleBinarySigns(in: a.denominator)
-            case let a as MTRadical: settleBinarySigns(in: a.radicand); settleBinarySigns(in: a.degree)
-            case let a as MTInner: settleBinarySigns(in: a.innerList)
-            case let a as MTOverLine: settleBinarySigns(in: a.innerList)
-            case let a as MTUnderLine: settleBinarySigns(in: a.innerList)
-            case let a as MTAccent: settleBinarySigns(in: a.innerList)
-            case let a as MTMathColor: settleBinarySigns(in: a.innerList)
-            case let a as MTMathTextColor: settleBinarySigns(in: a.innerList)
-            case let a as MTMathColorbox: settleBinarySigns(in: a.innerList)
-            case let a as MTMathTable: a.cells.joined().forEach { settleBinarySigns(in: $0) }
+            case let a as MTFraction: forEachList(in: a.numerator, body); forEachList(in: a.denominator, body)
+            case let a as MTRadical: forEachList(in: a.radicand, body); forEachList(in: a.degree, body)
+            case let a as MTInner: forEachList(in: a.innerList, body)
+            case let a as MTOverLine: forEachList(in: a.innerList, body)
+            case let a as MTUnderLine: forEachList(in: a.innerList, body)
+            case let a as MTAccent: forEachList(in: a.innerList, body)
+            case let a as MTMathColor: forEachList(in: a.innerList, body)
+            case let a as MTMathTextColor: forEachList(in: a.innerList, body)
+            case let a as MTMathColorbox: forEachList(in: a.innerList, body)
+            case let a as MTMathTable: a.cells.joined().forEach { forEachList(in: $0, body) }
             default: break
             }
-            if atom.type == .space || atom.type == .style { continue }   // glue, not an atom, to TeX
-            switch atom.type {
-            case .binaryOperator:
-                if prev.map({ [.binaryOperator, .relation, .open, .punctuation, .largeOperator].contains($0.type) }) ?? true {
-                    atom.type = .unaryOperator
-                }
-            case .relation, .punctuation, .close:
-                if let p = prev, p.type == .binaryOperator { p.type = .unaryOperator }
-            default:
-                break
-            }
-            prev = atom
         }
-        if let p = prev, p.type == .binaryOperator { p.type = .unaryOperator }
     }
 
     /// Fold an `NSColor` to a 24-bit fingerprint that's good enough to
@@ -280,11 +354,16 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         // Reused instance (see `reusableLabel`); every property is set below so no
         // stale state carries between formulas.
         let mathLabel = reusableLabel
-        // Parsed here instead of through `mathLabel.latex` so binary signs beside spacing can be
-        // settled first (`settleBinarySigns`). A parse error still leaves no display list.
+        // Parsed here instead of through `mathLabel.latex` so CJK can get through the parser
+        // (`standInsForCJK`) and binary signs beside spacing can be settled first
+        // (`settleBinarySigns`). A parse error still leaves no display list.
         var parseError: NSError?
-        let mathList = MTMathListBuilder.build(fromString: latex, error: &parseError)
-        if parseError == nil { Self.settleBinarySigns(in: mathList) }
+        let (parseable, cjk) = Self.standInsForCJK(latex)
+        let mathList = MTMathListBuilder.build(fromString: parseable, error: &parseError)
+        if parseError == nil {
+            Self.restoreCJK(in: mathList, cjk)
+            Self.settleBinarySigns(in: mathList)
+        }
         mathLabel.mathList = parseError == nil ? mathList : nil
         mathLabel.fontSize = fontSize
         mathLabel.textColor = textColor

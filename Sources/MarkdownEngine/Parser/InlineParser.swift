@@ -592,8 +592,8 @@ enum InlineParser {
         // A plain number is math: `系数为 $0$` is everyday in math notes, while prices only come out
         // as `$50$` when a dollar sits tight on both sides — `$5 and $10` never reaches here as a number.
         if isPlainNumber(trimmed) { return true }
-        // Chinese / Japanese / Korean outside `\text{…}` is prose, not math (SwiftMath can't set it in math
-        // mode either). It's what pairs up when one `$…$` is missed: `$y$ 和 $x'$ 用**常数**系数 $z$`.
+        // Chinese / Japanese / Korean outside `\text{…}` or a sub/superscript is prose, not math. It's what
+        // pairs up when one `$…$` is missed: `$y$ 和 $x'$ 用**常数**系数 $z$`.
         if hasBareCJK(trimmed) { return false }
         let mathyMatches = mathyCharCount(trimmed)
         if mathyMatches == 0 {
@@ -665,10 +665,22 @@ enum InlineParser {
         return i == u.count
     }
 
-    /// CJK text outside a `\text{…}`-style group (whose contents SwiftMath does set as text).
+    /// CJK text outside a `\text{…}`-style group and outside a sub/superscript. Both are how CJK is
+    /// written inside real formulas — `x>0 \text{且} y>0`, `[X]_补`, `x_{补码}` — and prose almost never
+    /// puts `_` or `^` right before a Chinese character, so neither lets a mispaired sentence through.
     private static func hasBareCJK(_ s: String) -> Bool {
         let u = Array(s.unicodeScalars)
-        let textGroups: Set<String> = ["text", "textrm", "textbf", "textit", "textsf", "texttt", "mbox"]
+        let textGroups: Set<String> = ["text", "textrm", "textbf", "textit", "textsf", "texttt", "mbox", "mathrm"]
+        /// Index just past the `{…}` group opening at `j`, nested braces included.
+        func pastGroup(_ j: Int) -> Int {
+            var depth = 0
+            var k = j
+            while k < u.count {
+                if u[k] == "{" { depth += 1 } else if u[k] == "}" { depth -= 1; if depth == 0 { break } }
+                k += 1
+            }
+            return k + 1
+        }
         var i = 0
         while i < u.count {
             let v = u[i].value
@@ -677,17 +689,21 @@ enum InlineParser {
                 while j < u.count, u[j].isASCII, isAsciiLetter(unichar(u[j].value)) { j += 1 }
                 let name = String(String.UnicodeScalarView(u[(i + 1)..<j]))
                 if textGroups.contains(name), j < u.count, u[j] == "{" {
-                    var depth = 0
-                    var k = j
-                    while k < u.count {   // skip the group, nested braces included
-                        if u[k] == "{" { depth += 1 } else if u[k] == "}" { depth -= 1; if depth == 0 { break } }
-                        k += 1
-                    }
-                    i = k + 1
+                    i = pastGroup(j)
                 } else {
                     i = max(j, i + 1)
                 }
                 continue
+            }
+            if u[i] == "_" || u[i] == "^", i + 1 < u.count {
+                if u[i + 1] == "{" { i = pastGroup(i + 1); continue }
+                // The whole run, though TeX (and the renderer) subscripts only `补` of `_补码`: what's
+                // asked here is only whether this is a formula, and a sloppy one still is.
+                if isCJK(u[i + 1].value) {
+                    i += 1
+                    while i < u.count, isCJK(u[i].value) { i += 1 }
+                    continue
+                }
             }
             if isCJK(v) { return true }
             i += 1
