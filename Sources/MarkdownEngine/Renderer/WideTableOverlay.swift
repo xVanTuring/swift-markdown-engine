@@ -117,15 +117,62 @@ final class WideTableOverlay: NSScrollView {
         }
     }
 
-    /// Forward everything except clearly-horizontal events to the outer
-    /// document scroll. Zero-delta phase/momentum lifecycle events count
-    /// as "not horizontal" so the outer scroll view still receives the
-    /// gesture-ended notifications it needs to stop cleanly.
+    /// Who a trackpad gesture scrolls: the table, or the document around it.
+    enum ScrollTarget { case table, document }
+
+    /// The current gesture's target; nil until it has moved.
+    private(set) var gestureTarget: ScrollTarget?
+    /// The gesture's events from before it moved (touch down, a still `began`),
+    /// held until its first movement says where they go.
+    private var eventsBeforeMovement: [NSEvent] = []
+
+    /// A horizontal gesture scrolls the table, anything else the document.
+    ///
+    /// A trackpad gesture is decided once, by its first movement, and every
+    /// event of it goes the same way: touch down, the fingers lifting and the
+    /// momentum after. A scroll view drops momentum unless it saw the whole
+    /// gesture, so routing event by event (the lift and touch down carry no
+    /// delta, and went to the document) left a flicked table stopping dead
+    /// the moment the fingers lifted. A mouse wheel has no gesture: each notch
+    /// goes by its own axis.
     override func scrollWheel(with event: NSEvent) {
-        if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
-            super.scrollWheel(with: event)
-        } else {
-            nextResponder?.scrollWheel(with: event)
+        guard !event.phase.isEmpty || !event.momentumPhase.isEmpty else {
+            deliver(event, to: Self.target(of: event))
+            return
+        }
+        if event.phase.contains(.mayBegin) {
+            gestureTarget = nil
+            eventsBeforeMovement = [event]
+            return
+        }
+        if event.phase.contains(.began) {
+            gestureTarget = nil
+        }
+        if gestureTarget == nil {
+            let moved = event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0
+            let ends = !event.phase.isDisjoint(with: [.ended, .cancelled]) || !event.momentumPhase.isEmpty
+            guard moved || ends else {
+                eventsBeforeMovement.append(event)
+                return
+            }
+            // A touch that never moved goes to the document, which owns the page.
+            let target = moved ? Self.target(of: event) : .document
+            gestureTarget = target
+            let held = eventsBeforeMovement
+            eventsBeforeMovement = []
+            held.forEach { deliver($0, to: target) }
+        }
+        deliver(event, to: gestureTarget ?? .document)
+    }
+
+    private static func target(of event: NSEvent) -> ScrollTarget {
+        abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) ? .table : .document
+    }
+
+    private func deliver(_ event: NSEvent, to target: ScrollTarget) {
+        switch target {
+        case .table: super.scrollWheel(with: event)
+        case .document: nextResponder?.scrollWheel(with: event)
         }
     }
 
