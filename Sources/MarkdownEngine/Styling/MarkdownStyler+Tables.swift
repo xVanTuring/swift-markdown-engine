@@ -139,7 +139,8 @@ extension MarkdownStyler {
         parsed: ParsedTable,
         ctx: StylingContext,
         appearance: NSAppearance,
-        availableWidth: CGFloat
+        availableWidth: CGFloat,
+        hiddenCell: (row: Int, column: Int)? = nil
     ) -> (image: NSImage, rendered: Bool) {
         // Rendering consumes the exact point width. Key it losslessly as well:
         // fractional SwiftUI/split-view widths can differ by more than 0.5 pt
@@ -151,7 +152,9 @@ extension MarkdownStyler {
         // never share a cached image.
         let extensionKey = ctx.configuration.extensionRegistry.fingerprint
         let style = ctx.configuration.tableAppearance
-        let key = (themeKeyPrefix(ctx: ctx, appearance: appearance) + "|x\(extensionKey)|s\(style)|w\(widthKey)|" + source) as NSString
+        let hiddenKey = hiddenCell.map { "|h\($0.row),\($0.column)" } ?? ""
+        let key = (themeKeyPrefix(ctx: ctx, appearance: appearance)
+            + "|x\(extensionKey)|s\(style)|w\(widthKey)\(hiddenKey)|" + source) as NSString
         if let cached = tableImageCache.object(forKey: key) {
             return (cached, false)
         }
@@ -164,7 +167,8 @@ extension MarkdownStyler {
             appearance: appearance,
             availableWidth: availableWidth,
             extensions: ctx.configuration.extensions,
-            style: style
+            style: style,
+            hiddenCell: hiddenCell
         )
         tableImageCache.setObject(image, forKey: key)
         return (image, true)
@@ -245,12 +249,17 @@ extension MarkdownStyler {
             // only exceeds it when the per-column floors genuinely don't fit,
             // in which case the scrollable overlay below takes over.
             let containerWidth = effectiveContainerWidth(for: ctx)
+            // (fork: xVanTuring) The cell open in the in-place editor is drawn
+            // without its text: the editor, which has no fill, shows it there.
+            let hiddenCell = (ctx.layoutBridge?.firstTextContainer?.textView as? NativeTextView)?
+                .editedTableCell(tableStart: token.range.location)
             let (image, rendered) = tableImage(
                 for: source,
                 parsed: parsed,
                 ctx: ctx,
                 appearance: renderAppearance,
-                availableWidth: containerWidth
+                availableWidth: containerWidth,
+                hiddenCell: hiddenCell
             )
             if rendered { renderedCount += 1 }
             let imageBounds = CGRect(x: 0, y: 0, width: image.size.width, height: image.size.height)
@@ -544,7 +553,8 @@ extension MarkdownStyler {
         appearance: NSAppearance,
         availableWidth: CGFloat,
         extensions: [any MarkdownExtension] = [],
-        style: TableAppearance = .grid
+        style: TableAppearance = .grid,
+        hiddenCell: (row: Int, column: Int)? = nil
     ) -> NSImage {
         let columnCount = table.alignments.count
         let metrics = style.metrics
@@ -587,27 +597,35 @@ extension MarkdownStyler {
         // CSS automatic table layout (W3C 17.5.2.2), which is what browser-based
         // editors like Obsidian get for free: each column has a MAXIMUM width
         // (content on one line) and a MINIMUM width (MCW — content may wrap but
-        // must not overflow, i.e. the widest unbreakable whitespace-separated
-        // segment). Measured segment-by-segment: a too-narrow boundingRect
-        // would emergency-break INSIDE words and understate the minimum.
+        // must not overflow, i.e. the widest unbreakable segment). Segments end
+        // at whitespace and (fork: xVanTuring) wherever text may break beside
+        // Chinese / Japanese / Korean — written without spaces, a CJK sentence
+        // used to count as ONE unbreakable word, so CJK tables never wrapped and
+        // scrolled sideways instead. Measured segment-by-segment: a too-narrow
+        // boundingRect would emergency-break INSIDE words and understate the
+        // minimum.
         func widestUnbreakableSegment(_ cell: NSAttributedString) -> CGFloat {
             let str = cell.string as NSString
             let whitespace = CharacterSet.whitespacesAndNewlines
+            let cjkBreaks = Self.cjkLineBreakOpportunities(in: str)
             var widest: CGFloat = 0
             var segStart = -1
+            func closeSegment(at i: Int) {
+                guard segStart >= 0 else { return }
+                let segment = cell.attributedSubstring(from: NSRange(location: segStart, length: i - segStart))
+                widest = max(widest, ceil(segment.size().width))
+                segStart = -1
+            }
             for i in 0...str.length {
                 let isBreak = i == str.length || {
                     guard let scalar = Unicode.Scalar(str.character(at: i)) else { return false }
                     return whitespace.contains(scalar)
                 }()
                 if isBreak {
-                    if segStart >= 0 {
-                        let segment = cell.attributedSubstring(from: NSRange(location: segStart, length: i - segStart))
-                        widest = max(widest, ceil(segment.size().width))
-                        segStart = -1
-                    }
-                } else if segStart < 0 {
-                    segStart = i
+                    closeSegment(at: i)
+                } else {
+                    if cjkBreaks.contains(i) { closeSegment(at: i) }
+                    if segStart < 0 { segStart = i }
                 }
             }
             return widest
@@ -623,9 +641,21 @@ extension MarkdownStyler {
                 options: [.usesLineFragmentOrigin]
             ).width)
         }
+        // (fork: xVanTuring) CJK may break between any two characters, so its
+        // unbreakable segments are one or two characters wide: a table whose
+        // columns don't all fit (they then sit at their minimums) set CJK
+        // columns one character wide, the text running down the column.
+        // A cell with CJK keeps at least six characters' width (or its own
+        // width, when shorter).
+        let cjkColumnFloor = ceil(baseFont.pointSize * 6)
         func considerCell(_ cell: NSAttributedString, col: Int) {
-            maxWidths[col] = max(maxWidths[col], naturalWidth(cell))
-            minWidths[col] = max(minWidths[col], widestUnbreakableSegment(cell))
+            let natural = naturalWidth(cell)
+            maxWidths[col] = max(maxWidths[col], natural)
+            var minimum = widestUnbreakableSegment(cell)
+            if !Self.cjkLineBreakOpportunities(in: cell.string as NSString).isEmpty {
+                minimum = max(minimum, min(natural, cjkColumnFloor))
+            }
+            minWidths[col] = max(minWidths[col], minimum)
         }
         for (i, cell) in headerCells.enumerated() where i < columnCount {
             considerCell(cell, col: i)
@@ -718,6 +748,14 @@ extension MarkdownStyler {
         let strongRule = mutedColor(alpha: 0.32)
         let lightRule = mutedColor(alpha: 0.2)
 
+        let geometry = TableGeometry(
+            columnLeft: columnLeft,
+            rowTop: rowTop,
+            borderWidth: borderWidth,
+            imageSize: size,
+            style: style,
+            hiddenCell: hiddenCell
+        )
         // Flipped image so AppKit handles the y-flip; a manual transform mirror would flip glyphs too.
         let image = NSImage(size: size, flipped: true) { _ in
             if isRounded {
@@ -788,6 +826,9 @@ extension MarkdownStyler {
 
             func drawCell(_ s: NSAttributedString, col: Int, row: Int) {
                 guard col < columnCount else { return }
+                // The cell open in the in-place editor shows the editor's text
+                // instead (fork: xVanTuring — see `TableGeometry.hiddenCell`).
+                if let hidden = geometry.hiddenCell, hidden.row == row, hidden.column == col { return }
                 let cellLeft = columnLeft[col] + cellHPadding
                 let cellRight = columnLeft[col + 1] - borderWidth - cellHPadding
                 let cellContentWidth = cellRight - cellLeft
@@ -825,13 +866,7 @@ extension MarkdownStyler {
             }
             return true
         }
-        image.tableGeometry = TableGeometry(
-            columnLeft: columnLeft,
-            rowTop: rowTop,
-            borderWidth: borderWidth,
-            imageSize: size,
-            style: style
-        )
+        image.tableGeometry = geometry
         return image
     }
 
@@ -879,5 +914,60 @@ extension MarkdownStyler {
         hasher.combine(source)
         hasher.combine(occurrenceIndex)
         return hasher.finalize()
+    }
+
+    // MARK: - CJK line breaks (fork: xVanTuring)
+
+    /// UTF-16 offsets where a line may break beside Chinese / Japanese / Korean
+    /// text: the Unicode line-breaking rules (UAX #14, via ICU's line-break
+    /// tokenizer — which keeps `，` `。` `）` off a line start and `（` `「` off a
+    /// line end) at every opportunity whose neighbour on either side is CJK.
+    /// Opportunities between two non-CJK characters are left out, so Latin
+    /// text still breaks only at whitespace, as the table layout always did.
+    static func cjkLineBreakOpportunities(in str: NSString) -> IndexSet {
+        let length = str.length
+        guard length > 1 else { return IndexSet() }
+        var hasCJK = false
+        for i in 0..<length where isCJKUnit(str.character(at: i)) { hasCJK = true; break }
+        guard hasCJK else { return IndexSet() }
+        var out = IndexSet()
+        let tokenizer = CFStringTokenizerCreate(
+            nil, str as CFString, CFRange(location: 0, length: length),
+            kCFStringTokenizerUnitLineBreak, nil
+        )
+        while CFStringTokenizerAdvanceToNextToken(tokenizer) != [] {
+            let at = CFStringTokenizerGetCurrentTokenRange(tokenizer).location
+            guard at > 0, at < length else { continue }
+            if isCJKUnit(str.character(at: at)) || isCJKUnit(str.character(at: at - 1)) {
+                out.insert(at)
+            }
+        }
+        return out
+    }
+
+    /// A UTF-16 unit of Chinese / Japanese / Korean script or punctuation
+    /// (the high surrogate of a supplementary ideograph counts; its low half
+    /// never starts a token).
+    static func isCJKUnit(_ u: unichar) -> Bool {
+        switch u {
+        case 0x2E80...0x2FDF,   // radicals
+             0x3000...0x303F,   // CJK symbols and punctuation
+             0x3040...0x30FF,   // hiragana, katakana
+             0x3100...0x312F,   // bopomofo
+             0x3130...0x318F,   // hangul compatibility jamo
+             0x31A0...0x31FF,   // bopomofo ext, katakana ext
+             0x3200...0x33FF,   // enclosed CJK, compatibility
+             0x3400...0x4DBF,   // ext A
+             0x4E00...0x9FFF,   // unified ideographs
+             0xA960...0xA97F,   // hangul jamo ext A
+             0xAC00...0xD7AF,   // hangul syllables
+             0xD840...0xD8BF,   // high surrogates of U+20000–U+3FFFF (ext B–H)
+             0xF900...0xFAFF,   // compatibility ideographs
+             0xFE30...0xFE4F,   // compatibility forms
+             0xFF00...0xFFEF:   // fullwidth / halfwidth forms
+            return true
+        default:
+            return false
+        }
     }
 }

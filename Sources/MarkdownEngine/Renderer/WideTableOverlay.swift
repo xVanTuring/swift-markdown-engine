@@ -150,6 +150,32 @@ final class WideTableOverlay: NSScrollView {
         if !layer.masksToBounds { layer.masksToBounds = true }
     }
 
+    /// The selection colour behind the table while it is in the text
+    /// selection (fork: xVanTuring); nil when it is not. Painted as the image
+    /// view's layer background, under the image and inside the rounded clip,
+    /// so it takes the panel's shape and scrolls with the table.
+    private(set) var selectionHighlight: NSColor?
+
+    func setSelectionHighlight(_ color: NSColor?) {
+        guard color != selectionHighlight else { return }
+        selectionHighlight = color
+        applySelectionHighlight()
+    }
+
+    private func applySelectionHighlight() {
+        tableImageView.wantsLayer = true
+        var cg: CGColor?
+        if let color = selectionHighlight {
+            tableImageView.effectiveAppearance.performAsCurrentDrawingAppearance { cg = color.cgColor }
+        }
+        tableImageView.layer?.backgroundColor = cg
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        if selectionHighlight != nil { applySelectionHighlight() }
+    }
+
     /// Who a trackpad gesture scrolls: the table, or the document around it.
     enum ScrollTarget { case table, document }
 
@@ -508,6 +534,10 @@ extension NativeTextView {
             host.setNeedsDisplay(overlay.frame)
             overlay.removeFromSuperview()
             wideTableOverlays.removeValue(forKey: sourceID)
+        }
+        // A table re-rendered (or newly wide) inside the selection keeps its highlight.
+        if selectedRanges.contains(where: { $0.rangeValue.length > 0 }) {
+            updateWideTableSelectionHighlights()
         }
     }
 

@@ -25,6 +25,9 @@ final class TableGripView: NSView {
 
     static let longSide: CGFloat = 22
     static let shortSide: CGFloat = 12
+    /// (fork: xVanTuring) Room around the drawn pill that still takes the
+    /// mouse: a 12 × 22 pt target was hard to hit.
+    static let hitPadding: CGFloat = 5
 
     init(axis: TableAxis) {
         self.axis = axis
@@ -40,8 +43,26 @@ final class TableGripView: NSView {
         addCursorRect(bounds, cursor: .openHand)
     }
 
+    // The text view underneath sets the I-beam on every mouse move; a tracking
+    // area of our own gets the cursor update while the pointer is over the grip
+    // (fork: xVanTuring — cursor rects alone lost to the text view).
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero, options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil
+        ))
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.openHand.set()
+    }
+
+    /// The drawn pill: the view's bounds less the hit padding.
+    var pillRect: NSRect { bounds.insetBy(dx: Self.hitPadding, dy: Self.hitPadding) }
+
     override func draw(_ dirtyRect: NSRect) {
-        let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        let pill = NSBezierPath(roundedRect: pillRect.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
         (isSelected ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor.withAlphaComponent(0.35)).setFill()
         pill.fill()
         (isSelected ? NSColor.white : NSColor.secondaryLabelColor).setFill()
@@ -50,7 +71,8 @@ final class TableGripView: NSView {
         let dot: CGFloat = 2, gap: CGFloat = 2
         let width = CGFloat(cols) * dot + CGFloat(cols - 1) * gap
         let height = CGFloat(rows) * dot + CGFloat(rows - 1) * gap
-        let originX = (bounds.width - width) / 2, originY = (bounds.height - height) / 2
+        let originX = pillRect.minX + (pillRect.width - width) / 2
+        let originY = pillRect.minY + (pillRect.height - height) / 2
         for r in 0..<rows {
             for c in 0..<cols {
                 NSBezierPath(ovalIn: NSRect(
@@ -237,9 +259,10 @@ extension NativeTextView {
                                   y: rowFrame.midY - long / 2,
                                   width: short, height: long)
 
-        place(state.columnGrip, axis: .column, index: state.column, frame: columnGripFrame,
+        let pad = TableGripView.hitPadding
+        place(state.columnGrip, axis: .column, index: state.column, frame: columnGripFrame.insetBy(dx: -pad, dy: -pad),
               host: columns.host, clip: clip, tableStart: state.tableStart)
-        place(state.rowGrip, axis: .row, index: state.row, frame: rowGripFrame,
+        place(state.rowGrip, axis: .row, index: state.row, frame: rowGripFrame.insetBy(dx: -pad, dy: -pad),
               host: columns.host, clip: clip, tableStart: state.tableStart)
         updateGripSelectionHighlight()
     }

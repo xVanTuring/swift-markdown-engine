@@ -94,20 +94,47 @@ final class TableCellEditorView: NSTextView {
         isAutomaticSpellingCorrectionEnabled = false
         isContinuousSpellCheckingEnabled = false
         isGrammarCheckingEnabled = false
+        // (fork: xVanTuring) No fill: the table is rendered without this cell's
+        // text while it is open (`TableGeometry.hiddenCell`), so the editor's
+        // text sits where the cell's was, on the table's own background. A
+        // rounded outline in the system focus colour marks the open cell.
+        drawsBackground = false
+        backgroundColor = .clear
         wantsLayer = true
-        layer?.borderWidth = 1.5
+        layer?.borderWidth = 2
+        layer?.cornerCurve = .continuous
+        applyOutline()
+    }
+
+    /// Corner radius of the outline: follows the table's look.
+    var outlineRadius: CGFloat = 4 {
+        didSet { applyOutline() }
+    }
+
+    /// The outline's colour, resolved for this view's appearance. Set here, not
+    /// in `updateLayer`: a text view draws with `draw(_:)`, so `updateLayer` is
+    /// never called and the border kept CALayer's default opaque black.
+    private func applyOutline() {
+        guard let layer else { return }
+        var color: CGColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = NSColor.keyboardFocusIndicatorColor.cgColor
+        }
+        layer.borderColor = color
+        layer.cornerRadius = outlineRadius
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyOutline()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
-    override func updateLayer() {
-        super.updateLayer()
-        layer?.borderColor = NSColor.controlAccentColor.cgColor
-    }
-
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        applyOutline()
         needsDisplay = true
     }
 
@@ -375,10 +402,12 @@ extension NativeTextView {
         let session = TableEditSession(tableStart: token.range.location, row: row, column: column, editor: editor)
         tableEditSession = session
         loadTableCell(into: session, from: parsed)
+        rerenderTablesForCellEditor()
 
         guard layoutTableCellEditor() else {
             editor.removeFromSuperview()
             tableEditSession = nil
+            rerenderTablesForCellEditor()
             return false
         }
         window?.makeFirstResponder(editor)
@@ -449,6 +478,7 @@ extension NativeTextView {
             return
         }
         loadTableCell(into: session, from: fresh)
+        rerenderTablesForCellEditor()
         layoutTableCellEditor()
         let editor = session.editor
         let selectsAll = move == .next || move == .previous
@@ -471,6 +501,7 @@ extension NativeTextView {
         let tableRange = table(startingAt: session.tableStart)?.token.range
         session.editor.removeFromSuperview()
         tableEditSession = nil
+        rerenderTablesForCellEditor()
 
         if restoreFocus { window?.makeFirstResponder(self) }
         guard let tableRange else { return }
@@ -560,8 +591,7 @@ extension NativeTextView {
             : baseFont
         editor.textColor = configuration.theme.bodyText
         editor.insertionPointColor = configuration.theme.bodyText
-        editor.backgroundColor = backgroundColor.alphaComponent > 0 ? backgroundColor : .textBackgroundColor
-        editor.drawsBackground = true
+        editor.outlineRadius = style == .rounded ? 6 : 3
         editor.textContainerInset = NSSize(width: metrics.cellHorizontal, height: metrics.vertical(row: session.row))
         switch parsed.alignments[session.column] {
         case .left: editor.alignment = .left
@@ -628,6 +658,29 @@ extension NativeTextView {
         }
         return true
     }
+
+    // MARK: The open cell's text, left out of the image (fork: xVanTuring)
+
+    /// The cell of the table starting at `tableStart` that is open in the
+    /// editor, for the table renderer: it draws that cell without its text.
+    /// The editor has no fill (one never matched what lies under it — over a
+    /// clear text view it fell back to the text background, a dark box in a
+    /// light-grey table); its text takes the cell text's place instead.
+    func editedTableCell(tableStart: Int) -> (row: Int, column: Int)? {
+        guard let session = tableEditSession, !session.isFinishing, session.tableStart == tableStart else { return nil }
+        return (session.row, session.column)
+    }
+
+    /// Renders the tables again after the open cell changed (opened, moved,
+    /// closed), as a width change does: each view showing the table gets a
+    /// new image. Changing the image in place and asking its views to redraw
+    /// did not reach the screen — a view handed the same image again kept
+    /// showing what it had drawn, one cell behind.
+    func rerenderTablesForCellEditor() {
+        guard let coordinator = delegate as? NativeTextViewCoordinator else { return }
+        let wideAnchors = coordinator.restyleTablesForWidthChange(in: self)
+        updateWideTableOverlays(immediately: true, knownWideTableAnchorRanges: wideAnchors)
+    }
 }
 
 // MARK: - Row / column operations and the table menu
@@ -656,6 +709,7 @@ extension NativeTextView {
             return
         }
         loadTableCell(into: session, from: fresh)
+        rerenderTablesForCellEditor()
         layoutTableCellEditor()
         session.editor.setSelectedRange(NSRange(location: (session.editor.string as NSString).length, length: 0))
     }

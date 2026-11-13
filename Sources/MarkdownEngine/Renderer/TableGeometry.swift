@@ -20,14 +20,21 @@ final class TableGeometry {
     let imageSize: CGSize
     /// The look it was drawn in: its cell padding is what the cell editor copies.
     let style: TableAppearance
+    /// (fork: xVanTuring) A cell whose text the image leaves out: the one open
+    /// in the in-place editor, which lies over it with no fill and shows the
+    /// same text where it was. Part of the image (and of its cache key): the
+    /// table is rendered again when the editor opens, moves or closes, so the
+    /// views that show it get a new image, as on any other change.
+    let hiddenCell: (row: Int, column: Int)?
 
     init(columnLeft: [CGFloat], rowTop: [CGFloat], borderWidth: CGFloat, imageSize: CGSize,
-         style: TableAppearance = .grid) {
+         style: TableAppearance = .grid, hiddenCell: (row: Int, column: Int)? = nil) {
         self.columnLeft = columnLeft
         self.rowTop = rowTop
         self.borderWidth = borderWidth
         self.imageSize = imageSize
         self.style = style
+        self.hiddenCell = hiddenCell
     }
 
     var columnCount: Int { max(0, columnLeft.count - 1) }

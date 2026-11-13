@@ -13,7 +13,11 @@ extension NativeTextView {
 
     override func mouseMoved(with event: NSEvent) {
         updateTableGrips(for: event)
-        if isInCursorExclusionZone(event) {
+        if isOverTableGrip(event) {
+            // A grip is a handle, not text: super would set the I-beam over it
+            // on every move, beating the grip's own cursor (fork: xVanTuring).
+            NSCursor.openHand.set()
+        } else if isInCursorExclusionZone(event) {
             // Editable+excluded = a panel over the editor (#81): own the arrow.
             // Read-only+excluded = a full-window overlay (search/transfer) owns
             // the cursor; stay silent — our tracking areas fire beneath it and
@@ -38,7 +42,9 @@ extension NativeTextView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        if isInCursorExclusionZone(event) {
+        if isOverTableGrip(event) {
+            NSCursor.openHand.set()
+        } else if isInCursorExclusionZone(event) {
             if isEditable { NSCursor.arrow.set() }
         } else if isEditable, isOverTaskCheckboxBox(event) {
             NSCursor.arrow.set()
@@ -49,6 +55,15 @@ extension NativeTextView {
             applyReadOnlyCursor(for: event)
             applyInvertedIBeamIfNeeded(for: event)
         }
+    }
+
+    /// True when the pointer is over a shown row / column grip of a table.
+    func isOverTableGrip(_ event: NSEvent) -> Bool {
+        guard let state = tableGripState else { return false }
+        for grip in [state.columnGrip, state.rowGrip] where grip.superview != nil && !grip.isHidden {
+            if grip.bounds.contains(grip.convert(event.locationInWindow, from: nil)) { return true }
+        }
+        return false
     }
 
     /// True when the pointer is over a wide-table overlay's HORIZONTAL

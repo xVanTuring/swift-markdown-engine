@@ -640,6 +640,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
             if isBlock {
                 guard let rect = blockImageDrawRect(attrRange: attrRange, imageBounds: imageBounds, blockOffsetY: blockOffsetY, point: point) else { return }
                 drawRect = rect
+                drawSelectionHighlight(behind: image, in: rect, attrRange: attrRange, storage: ts)
             } else {
                 let descent = imageBounds.origin.y
                 drawRect = CGRect(x: pos.x,
@@ -648,6 +649,27 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
             }
             image.draw(in: drawRect)
         }
+    }
+
+    /// (fork: xVanTuring) A collapsed block in a non-empty selection is left
+    /// out of the system highlight (`MarkdownTextLayoutManager`) and painted
+    /// here instead, behind its image in its own shape: a table's panel with
+    /// the table's corner radius, a formula / drawn fence a little wider than
+    /// its ink. Fragments are redrawn when the selection changes (selected
+    /// text is drawn in the selected text colour), so this follows it.
+    private func drawSelectionHighlight(behind image: NSImage, in rect: CGRect, attrRange: NSRange, storage: NSTextStorage) {
+        guard storage.attribute(.renderedBlockRange, at: attrRange.location, effectiveRange: nil) != nil,
+              let textView = textLayoutManager?.textContainer?.textView as? NativeTextView,
+              textView.isInNonEmptySelection(attrRange) else { return }
+        let shape: NSBezierPath
+        if let geometry = image.tableGeometry {
+            let radius = geometry.style.metrics.cornerRadius
+            shape = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        } else {
+            shape = NSBezierPath(roundedRect: rect.insetBy(dx: -3, dy: -2), xRadius: 4, yRadius: 4)
+        }
+        textView.selectionHighlightColor.setFill()
+        shape.fill()
     }
 
     // MARK: - Thematic Breaks (---, ***, ___)

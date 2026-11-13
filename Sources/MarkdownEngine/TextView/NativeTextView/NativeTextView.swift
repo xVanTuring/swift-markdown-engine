@@ -18,6 +18,27 @@ import AppKit
 import UniformTypeIdentifiers
 
 final class NativeTextView: NSTextView {
+    // MARK: TextKit 2 stack (fork: xVanTuring)
+    /// The content storage of the stack built in `init(frame:)`. A layout
+    /// manager only holds its content manager weakly, so the view keeps it.
+    private var ownedTextContentStorage: NSTextContentStorage?
+
+    /// The same TextKit 2 stack `NSTextView(frame:)` builds — a container as
+    /// wide as the frame that tracks the view's width, 10 000 000 pt tall, in
+    /// a fresh content storage — with a `MarkdownTextLayoutManager`, so a
+    /// selection highlight can leave rendered blocks out.
+    override convenience init(frame frameRect: NSRect) {
+        let layoutManager = MarkdownTextLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: frameRect.width, height: 10_000_000))
+        container.widthTracksTextView = true
+        layoutManager.textContainer = container
+        let contentStorage = NSTextContentStorage()
+        contentStorage.addTextLayoutManager(layoutManager)
+        contentStorage.primaryTextLayoutManager = layoutManager
+        self.init(frame: frameRect, textContainer: container)
+        ownedTextContentStorage = contentStorage
+    }
+
     // MARK: Frame & overscroll state
     var baseContentHeight: CGFloat = 0
     var activeBottomOverscroll: CGFloat = 0
@@ -165,6 +186,8 @@ final class NativeTextView: NSTextView {
         if let window, window !== newWindow {
             heldFocusOnRemoval = window.firstResponder === self
             NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: window)
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
             reportFocusLossOnRemoval()
         }
         super.viewWillMove(toWindow: newWindow)
@@ -177,6 +200,13 @@ final class NativeTextView: NSTextView {
                 self, selector: #selector(focusWindowWillClose(_:)),
                 name: NSWindow.willCloseNotification, object: window
             )
+            // A selected wide table's highlight follows the system's: accent
+            // while the window is key, grey when not (fork: xVanTuring).
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(windowKeyStateDidChange(_:)), name: name, object: window
+                )
+            }
         }
         reconcileRequestedFocus()
         if window != nil, returnsFocusAfterParking {
@@ -203,8 +233,16 @@ final class NativeTextView: NSTextView {
         onFocusChange?(false)
     }
 
+    @objc private func windowKeyStateDidChange(_ note: Notification) {
+        updateWideTableSelectionHighlights()
+    }
+
     override func becomeFirstResponder() -> Bool {
         let didBecome = super.becomeFirstResponder()
+        if didBecome {
+            // The window names its first responder once this returns.
+            DispatchQueue.main.async { [weak self] in self?.updateWideTableSelectionHighlights() }
+        }
         if didBecome && !reportedFocus {
             reportedFocus = true
             onFocusChange?(true)
@@ -214,6 +252,9 @@ final class NativeTextView: NSTextView {
 
     override func resignFirstResponder() -> Bool {
         let didResign = super.resignFirstResponder()
+        if didResign {
+            DispatchQueue.main.async { [weak self] in self?.updateWideTableSelectionHighlights() }
+        }
         if didResign && reportedFocus {
             reportedFocus = false
             onFocusChange?(false)
