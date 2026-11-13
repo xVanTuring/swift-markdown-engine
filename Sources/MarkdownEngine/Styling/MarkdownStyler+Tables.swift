@@ -150,7 +150,8 @@ extension MarkdownStyler {
         // highlighted under one config and literal under another — those must
         // never share a cached image.
         let extensionKey = ctx.configuration.extensionRegistry.fingerprint
-        let key = (themeKeyPrefix(ctx: ctx, appearance: appearance) + "|x\(extensionKey)|w\(widthKey)|" + source) as NSString
+        let style = ctx.configuration.tableAppearance
+        let key = (themeKeyPrefix(ctx: ctx, appearance: appearance) + "|x\(extensionKey)|s\(style)|w\(widthKey)|" + source) as NSString
         if let cached = tableImageCache.object(forKey: key) {
             return (cached, false)
         }
@@ -162,7 +163,8 @@ extension MarkdownStyler {
             latex: ctx.services.latex,
             appearance: appearance,
             availableWidth: availableWidth,
-            extensions: ctx.configuration.extensions
+            extensions: ctx.configuration.extensions,
+            style: style
         )
         tableImageCache.setObject(image, forKey: key)
         return (image, true)
@@ -388,14 +390,23 @@ extension MarkdownStyler {
         theme: MarkdownEditorTheme,
         codeBackgroundColor: NSColor,
         latex: any LatexRenderer,
-        extensions: [any MarkdownExtension] = []
+        extensions: [any MarkdownExtension] = [],
+        style: TableAppearance = .grid
     ) -> NSAttributedString {
         let descriptor = baseFont.fontDescriptor
-        let pointSize = baseFont.pointSize
+        // `.rounded`: the header is set a little smaller and semibold (not bold).
+        let headerScale = header ? style.metrics.headerScale : 1
+        let pointSize = (baseFont.pointSize * headerScale).rounded()
         let codeFont = NSFont.monospacedSystemFont(ofSize: pointSize, weight: .regular)
-        let startFont = header
-            ? (NSFont(descriptor: descriptor.withSymbolicTraits(.bold), size: pointSize) ?? baseFont)
-            : baseFont
+        let startFont: NSFont = {
+            guard header else { return baseFont }
+            switch style {
+            case .grid:
+                return NSFont(descriptor: descriptor.withSymbolicTraits(.bold), size: pointSize) ?? baseFont
+            case .rounded:
+                return headerFont(base: baseFont, size: pointSize)
+            }
+        }()
         let out = NSMutableAttributedString()
         var extensionsByID: [String: any MarkdownExtension] = [:]
         for ext in extensions { extensionsByID[ext.id] = ext }
@@ -412,8 +423,23 @@ extension MarkdownStyler {
         return out
     }
 
+    /// `.rounded` header type: the body face at `size`, semibold (bold when the
+    /// face has no semibold).
+    static func headerFont(base: NSFont, size: CGFloat) -> NSFont {
+        let semibold = base.fontDescriptor.addingAttributes([
+            .traits: [NSFontDescriptor.TraitKey.weight: NSFont.Weight.semibold]
+        ])
+        if let font = NSFont(descriptor: semibold, size: size),
+           font.fontDescriptor.symbolicTraits.contains(.bold)
+            || ((font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat ?? 0) > 0.2 {
+            return font
+        }
+        return NSFont(descriptor: base.fontDescriptor.withSymbolicTraits(.bold), size: size)
+            ?? NSFont.systemFont(ofSize: size, weight: .semibold)
+    }
+
     /// Compose `current`'s bold/italic traits with `kind` so nested emphasis stacks (italic+bold).
-    private static func composeEmphasis(
+    static func composeEmphasis(
         _ current: NSFont, _ kind: EmphasisKind,
         baseDescriptor: NSFontDescriptor, pointSize: CGFloat
     ) -> NSFont {
@@ -490,7 +516,9 @@ extension MarkdownStyler {
                 ) {
                     let attachment = NSTextAttachment()
                     attachment.image = entry.image
-                    attachment.bounds = CGRect(x: 0, y: entry.baselineOffset,
+                    // `baselineOffset` is how far the formula reaches BELOW the baseline; an attachment's
+                    // bounds.y is measured UP from it (fork fix: it was raised by twice its descent).
+                    attachment.bounds = CGRect(x: 0, y: -entry.baselineOffset,
                                                width: entry.size.width, height: entry.size.height)
                     out.append(NSAttributedString(attachment: attachment))
                 } else {
@@ -507,7 +535,7 @@ extension MarkdownStyler {
 
     // MARK: - Rendering
 
-    private static func renderTable(
+    static func renderTable(
         _ table: ParsedTable,
         baseFont: NSFont,
         theme: MarkdownEditorTheme,
@@ -515,12 +543,17 @@ extension MarkdownStyler {
         latex: any LatexRenderer,
         appearance: NSAppearance,
         availableWidth: CGFloat,
-        extensions: [any MarkdownExtension] = []
+        extensions: [any MarkdownExtension] = [],
+        style: TableAppearance = .grid
     ) -> NSImage {
         let columnCount = table.alignments.count
-        let cellHPadding: CGFloat = 12
-        let cellVPadding: CGFloat = 6
-        let borderWidth: CGFloat = 1
+        let metrics = style.metrics
+        let cellHPadding = metrics.cellHorizontal
+        let borderWidth: CGFloat = 1   // `.grid`: the lines; `.rounded`: the gap the rules sit in
+        let isRounded = style == .rounded
+        // Space outside the outermost cells: `.grid` has its border there.
+        let leftInset = isRounded ? metrics.outerHorizontal : borderWidth
+        let topInset = isRounded ? metrics.outerTop : borderWidth
         // Resolve under the real appearance: `.withAlphaComponent()` freezes a dynamic color otherwise.
         func mutedColor(alpha: CGFloat) -> NSColor {
             var resolved: NSColor = theme.mutedText
@@ -538,7 +571,7 @@ extension MarkdownStyler {
             formattedCellString(
                 $0, baseFont: baseFont, header: true, theme: theme,
                 codeBackgroundColor: codeBackgroundColor, latex: latex,
-                extensions: extensions
+                extensions: extensions, style: style
             )
         }
         let bodyCells = table.rows.map { row in
@@ -612,7 +645,9 @@ extension MarkdownStyler {
         //   their minimums, the table renders wider than the container, and
         //   the horizontal-scroll overlay takes over as before.
         let chrome = CGFloat(columnCount) * 2 * cellHPadding
-            + CGFloat(columnCount + 1) * borderWidth
+            + (isRounded
+                ? 2 * metrics.outerHorizontal + CGFloat(max(0, columnCount - 1)) * borderWidth
+                : CGFloat(columnCount + 1) * borderWidth)
         let contentAvailable = availableWidth - chrome
         let sumMax = maxWidths.reduce(0, +)
         let sumMin = minWidths.reduce(0, +)
@@ -639,6 +674,11 @@ extension MarkdownStyler {
         }
         let rowCount = 1 + table.rows.count // header + body rows
         var rowContentHeights = [CGFloat](repeating: baseLineHeight, count: rowCount)
+        if isRounded {
+            // An empty header cell is one line of the (smaller) header type.
+            let headerFont = headerFont(base: baseFont, size: (baseFont.pointSize * metrics.headerScale).rounded())
+            rowContentHeights[0] = ceil(headerFont.ascender - headerFont.descender + headerFont.leading)
+        }
         for (i, cell) in headerCells.enumerated() where i < columnCount {
             rowContentHeights[0] = max(rowContentHeights[0], cellHeight(cell, col: i))
         }
@@ -648,38 +688,51 @@ extension MarkdownStyler {
             }
         }
 
-        let totalWidth = columnWidths.reduce(0, +)
-            + CGFloat(columnCount) * 2 * cellHPadding
-            + CGFloat(columnCount + 1) * borderWidth
-        let totalHeight = rowContentHeights.reduce(0) { $0 + $1 + 2 * cellVPadding }
-            + CGFloat(rowCount + 1) * borderWidth
-
-        let size = NSSize(width: totalWidth, height: totalHeight)
-
         // Pre-compute layout offsets (top-down coords; drawing runs flipped).
+        // Each column / row box is followed by a `borderWidth` gap; `.grid`
+        // draws its lines in the gaps, `.rounded` its rules.
         var columnLeft = [CGFloat](repeating: 0, count: columnCount + 1)
-        columnLeft[0] = borderWidth
+        columnLeft[0] = leftInset
         for i in 0..<columnCount {
             columnLeft[i + 1] = columnLeft[i] + columnWidths[i] + 2 * cellHPadding + borderWidth
         }
         var rowTop = [CGFloat](repeating: 0, count: rowCount + 1)
-        rowTop[0] = borderWidth
+        rowTop[0] = topInset
         for i in 0..<rowCount {
-            rowTop[i + 1] = rowTop[i] + rowContentHeights[i] + 2 * cellVPadding + borderWidth
+            rowTop[i + 1] = rowTop[i] + rowContentHeights[i] + 2 * metrics.vertical(row: i) + borderWidth
         }
+        // `.grid`: the last gap is the right / bottom border. `.rounded`: no gap
+        // after the last column / row, just the panel's outer space.
+        let totalWidth = isRounded
+            ? columnLeft[columnCount] - borderWidth + metrics.outerHorizontal
+            : columnLeft[columnCount]
+        let totalHeight = isRounded
+            ? rowTop[rowCount] - borderWidth + metrics.outerBottom
+            : rowTop[rowCount]
+
+        let size = NSSize(width: totalWidth, height: totalHeight)
 
         let alignments = table.alignments
         let headerFill = mutedColor(alpha: 0.08)
+        let panelFill = mutedColor(alpha: 0.06)
+        let strongRule = mutedColor(alpha: 0.32)
+        let lightRule = mutedColor(alpha: 0.2)
 
         // Flipped image so AppKit handles the y-flip; a manual transform mirror would flip glyphs too.
         let image = NSImage(size: size, flipped: true) { _ in
-            // Header row fill
+            if isRounded {
+                drawRoundedChrome()
+            } else {
+                drawGridChrome()
+            }
+
+            func drawGridChrome() {
             headerFill.setFill()
             NSBezierPath(rect: NSRect(
                 x: borderWidth,
                 y: borderWidth,
                 width: size.width - 2 * borderWidth,
-                height: rowContentHeights[0] + 2 * cellVPadding
+                height: rowContentHeights[0] + 2 * metrics.headerVertical
             )).fill()
 
             // Outer border
@@ -707,6 +760,31 @@ extension MarkdownStyler {
                 separators.line(to: NSPoint(x: size.width, y: y))
             }
             separators.stroke()
+            }
+
+            /// Rounded panel, header dividers, a rule under the header, rules between rows.
+            func drawRoundedChrome() {
+                panelFill.setFill()
+                NSBezierPath(roundedRect: NSRect(origin: .zero, size: size),
+                             xRadius: metrics.cornerRadius, yRadius: metrics.cornerRadius).fill()
+                // Each rule fills its 1-pt gap exactly: crisp at any scale.
+                strongRule.setFill()
+                NSRect(x: 0, y: rowTop[1] - borderWidth, width: size.width, height: borderWidth).fill()
+                let titleTop = rowTop[0] + metrics.headerVertical
+                let titleBottom = rowTop[1] - borderWidth - metrics.headerVertical
+                for i in 1..<max(1, columnCount) {
+                    NSRect(x: columnLeft[i] - borderWidth, y: titleTop,
+                           width: borderWidth, height: max(0, titleBottom - titleTop)).fill()
+                }
+                lightRule.setFill()
+                let ruleLeft = columnLeft[0] + cellHPadding
+                if rowCount > 2 {
+                    for i in 2..<rowCount {
+                        NSRect(x: ruleLeft, y: rowTop[i] - borderWidth,
+                               width: size.width - ruleLeft, height: borderWidth).fill()
+                    }
+                }
+            }
 
             func drawCell(_ s: NSAttributedString, col: Int, row: Int) {
                 guard col < columnCount else { return }
@@ -730,7 +808,7 @@ extension MarkdownStyler {
                 )
                 let drawRect = NSRect(
                     x: cellLeft,
-                    y: rowTop[row] + cellVPadding,
+                    y: rowTop[row] + metrics.vertical(row: row),
                     width: cellContentWidth,
                     height: rowContentHeights[row]
                 )
@@ -751,7 +829,8 @@ extension MarkdownStyler {
             columnLeft: columnLeft,
             rowTop: rowTop,
             borderWidth: borderWidth,
-            imageSize: size
+            imageSize: size,
+            style: style
         )
         return image
     }

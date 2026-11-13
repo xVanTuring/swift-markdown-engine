@@ -14,6 +14,10 @@ import AppKit
 
 extension NativeTextViewCoordinator {
     func updateCodeBlockSelection(textView: NSTextView, parsed: ParsedDocument? = nil) {
+        // Nobody draws code-block overlays (read-only embeds, chat transcripts):
+        // skip — this used to force a full-document layout on every width change
+        // (fork: perf/live-resize; 73% of main-thread time while resizing).
+        guard onCodeBlockSelectionChange != nil else { return }
         guard let textContainer = textView.textContainer else {
             onCodeBlockSelectionChange?([])
             return
@@ -95,5 +99,13 @@ extension NativeTextViewCoordinator {
         }
 
         onCodeBlockSelectionChange?(selections)
+    }
+
+    /// The width settled after a live change: one exact pass (full layout + all
+    /// visible blocks) for what the live passes skipped.
+    func refreshCodeBlocksAfterWidthChange(in textView: NSTextView) {
+        guard onCodeBlockSelectionChange != nil else { return }
+        didEnsureLayoutForCurrentDocument = false
+        updateCodeBlockSelection(textView: textView)
     }
 }

@@ -18,12 +18,16 @@ final class TableGeometry {
     let rowTop: [CGFloat]
     let borderWidth: CGFloat
     let imageSize: CGSize
+    /// The look it was drawn in: its cell padding is what the cell editor copies.
+    let style: TableAppearance
 
-    init(columnLeft: [CGFloat], rowTop: [CGFloat], borderWidth: CGFloat, imageSize: CGSize) {
+    init(columnLeft: [CGFloat], rowTop: [CGFloat], borderWidth: CGFloat, imageSize: CGSize,
+         style: TableAppearance = .grid) {
         self.columnLeft = columnLeft
         self.rowTop = rowTop
         self.borderWidth = borderWidth
         self.imageSize = imageSize
+        self.style = style
     }
 
     var columnCount: Int { max(0, columnLeft.count - 1) }

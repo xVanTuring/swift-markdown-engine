@@ -28,6 +28,29 @@ final class NativeTextView: NSTextView {
     var pendingWideTableOverlayUpdate = false
     /// Coalesces table restyles to the latest width once per run-loop turn.
     var pendingTableWidthChangeUpdate = false
+    // MARK: Live width change (fork: perf/live-resize)
+    /// The width is changing continuously (a split-view divider or window being
+    /// dragged, or an embedder resizing per frame). While true, width-dependent
+    /// work takes cheap paths — a partially visible `.fitsContent` view lays out
+    /// only down to its visible bottom, a scrolling editor scales its last
+    /// height, code-block overlays skip the full-document layout — and a
+    /// settle pass redoes it exactly once the width has been still for
+    /// `liveWidthSettleDelay`. Detected from the width changes themselves, so it
+    /// covers NSSplitView drags and SwiftUI-driven frames, not only AppKit
+    /// window live resize.
+    var isInLiveWidthChange = false
+    var lastWidthChangeTime: CFTimeInterval = 0
+    var liveWidthSettleWork: DispatchWorkItem?
+    /// Width when the current burst of width changes began: `baseContentHeight`
+    /// was measured at it, so a scrolling editor's mid-drag height scales from it.
+    var liveWidthBaseWidth: CGFloat = 0
+    /// The frame height is a mid-drag estimate (scrolling editor); `baseContentHeight`
+    /// still holds the last exact measure.
+    var liveEstimatedScrollHeight = false
+    /// Width changes closer together than this count as one continuous change.
+    static let liveWidthChangeWindow: CFTimeInterval = 0.2
+    /// Quiet time after the last width change before the exact settle pass.
+    static let liveWidthSettleDelay: TimeInterval = 0.15
     var suppressAutoRevealOnce: Bool = false
     // Set by clickedOnLink during a mouseDown: did the delegate fire (so
     // mouseDown can re-dispatch a click AppKit dropped), and did it navigate

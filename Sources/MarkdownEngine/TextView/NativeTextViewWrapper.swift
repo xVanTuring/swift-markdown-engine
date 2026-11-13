@@ -418,7 +418,11 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
                 if textView.configuration.readingWidth != nil {
                     textView.centerReadingColumn(forClipWidth: newWidth)
                 }
-                context.coordinator.didEnsureLayoutForCurrentDocument = false
+                // Mid-drag: viewport-only positions (no full-document layout per
+                // frame); the text view's settle pass redoes them exactly.
+                if !textView.isInLiveWidthChange {
+                    context.coordinator.didEnsureLayoutForCurrentDocument = false
+                }
                 context.coordinator.updateCodeBlockSelection(textView: textView)
             }
             // Only react with overscroll recalc when the viewport itself resizes
@@ -574,6 +578,12 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         if editsTablesInPlaceChanged {
             context.coordinator.configuration.editsTablesInPlace = configuration.editsTablesInPlace
             textView.configuration.editsTablesInPlace = configuration.editsTablesInPlace
+        }
+        // Sync the table look (fork): every table re-renders in the new style.
+        let tableAppearanceChanged = context.coordinator.configuration.tableAppearance != configuration.tableAppearance
+        if tableAppearanceChanged {
+            context.coordinator.configuration.tableAppearance = configuration.tableAppearance
+            textView.configuration.tableAppearance = configuration.tableAppearance
         }
         // Sync the input-behavior toggles (auto-close pairs, list helpers).
         // The keystroke handlers read textView.configuration live, but only
@@ -748,7 +758,7 @@ public struct NativeTextViewWrapper: NSViewRepresentable {
         context.coordinator.rebuildTextStorageAndStyle(
             textView,
             from: text,
-            invalidateLayout: isNodeSwitch || rawSourceModeChanged || editsTablesInPlaceChanged,
+            invalidateLayout: isNodeSwitch || rawSourceModeChanged || editsTablesInPlaceChanged || tableAppearanceChanged,
             restoring: context.coordinator.selectionToRestore(for: documentId, text: text)
         )
         textView.recalcOverscroll(for: nsView)

@@ -546,17 +546,23 @@ extension NativeTextView {
         let raw = parsed.cell(row: session.row, column: session.column) ?? ""
         let editor = session.editor
         editor.string = MarkdownStyler.expandCellLineBreaks(raw)
-        editor.font = tableCoordinator.map {
+        let baseFont = tableCoordinator.map {
             TextStylingService.makeBaseFontAndStyle(
                 fontName: $0.fontName, fontSize: $0.fontSize,
                 layoutBridge: $0.layoutBridge, configuration: $0.configuration
             ).0
         } ?? .systemFont(ofSize: NSFont.systemFontSize)
+        // Same padding and (for a `.rounded` header) the same type as the cell it covers.
+        let style = configuration.tableAppearance
+        let metrics = style.metrics
+        editor.font = style == .rounded && session.row == 0
+            ? MarkdownStyler.headerFont(base: baseFont, size: (baseFont.pointSize * metrics.headerScale).rounded())
+            : baseFont
         editor.textColor = configuration.theme.bodyText
         editor.insertionPointColor = configuration.theme.bodyText
         editor.backgroundColor = backgroundColor.alphaComponent > 0 ? backgroundColor : .textBackgroundColor
         editor.drawsBackground = true
-        editor.textContainerInset = NSSize(width: 12, height: 6)
+        editor.textContainerInset = NSSize(width: metrics.cellHorizontal, height: metrics.vertical(row: session.row))
         switch parsed.alignments[session.column] {
         case .left: editor.alignment = .left
         case .center: editor.alignment = .center

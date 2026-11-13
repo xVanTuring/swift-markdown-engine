@@ -26,10 +26,36 @@ extension NativeTextView {
         // File switch/resize forces full layout until height settles; typing stays O(edit).
         if debugTag == "?" { pendingFullLayoutMeasure = true }
         let forcedFullLayout = pendingFullLayoutMeasure
-        let measured = measuredBaseContentHeight(
-            minimumHeight: lineHeight,
-            forceFullLayout: pendingFullLayoutMeasure
-        )
+        let measured: CGFloat
+        if pendingFullLayoutMeasure, let estimate = estimatedLiveContentHeight() {
+            // Mid-drag (bottom out of sight, or a scrolling editor): keep
+            // `pendingFullLayoutMeasure` so the settle pass still does the full layout.
+            measured = max(estimate, ceil(lineHeight + textContainerInset.height * 2))
+            PerfTrace.note { "overscroll[\(debugTag)]: liveEstimate h=\(Int(measured))" }
+            if configuration.heightBehavior == .scrolls {
+                // The base the next estimate scales from stays the last exact one.
+                activeBottomOverscroll = resolvedOverscroll(
+                    baseContentHeight: measured,
+                    visibleHeight: scrollView.contentView.bounds.height,
+                    lineHeight: lineHeight
+                )
+                let exactBase = baseContentHeight
+                baseContentHeight = measured
+                applyManagedFrameSize(width: targetWidth ?? frame.size.width)
+                baseContentHeight = exactBase
+                liveEstimatedScrollHeight = true
+                return
+            }
+            baseContentHeight = measured
+            activeBottomOverscroll = 0
+            applyManagedFrameSize(width: targetWidth ?? frame.size.width)
+            return
+        } else {
+            measured = measuredBaseContentHeight(
+                minimumHeight: lineHeight,
+                forceFullLayout: pendingFullLayoutMeasure
+            )
+        }
         let visibleHeight = scrollView.contentView.bounds.height
         let resolvedOverscroll = resolvedOverscroll(
             baseContentHeight: measured,
@@ -265,6 +291,7 @@ extension NativeTextView {
         // width-adaptive table at the previous width.
         let widthChanged = newSize.width != frame.size.width
         if widthChanged {
+            noteWidthChange()
             pendingFullLayoutMeasure = true   // re-wrap → re-measure height against a full layout
             isApplyingManagedFrameSize = true
             super.setFrameSize(NSSize(width: newSize.width, height: frame.size.height))
@@ -295,6 +322,86 @@ extension NativeTextView {
                 debugTag: "setFrameSize"
             )
         }
+    }
+
+    // MARK: Live width change (fork: perf/live-resize)
+
+    /// Records a width change and decides whether it is part of a continuous
+    /// one (another change within `liveWidthChangeWindow`, or AppKit live resize).
+    /// The first change of a burst stays exact; from the second on the cheap
+    /// paths apply, and every change re-arms the settle pass.
+    func noteWidthChange() {
+        let now = CACurrentMediaTime()
+        let live = now - lastWidthChangeTime < Self.liveWidthChangeWindow
+            || (enclosingScrollView as? ClampedScrollView)?.isLiveResizeActive == true
+        lastWidthChangeTime = now
+        guard live else {
+            liveWidthBaseWidth = frame.width   // 这一串变化开始前的宽度（对应 `baseContentHeight`）
+            return
+        }
+        isInLiveWidthChange = true
+        liveWidthSettleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.liveWidthDidSettle() }
+        }
+        liveWidthSettleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.liveWidthSettleDelay, execute: work)
+    }
+
+    /// The width has been still for a while: redo what the cheap paths skipped —
+    /// a full-layout height and exact code-block overlays. (Tables are not a
+    /// cheap path: they re-render at every intermediate width, as before.)
+    func liveWidthDidSettle() {
+        liveWidthSettleWork = nil
+        guard isInLiveWidthChange else { return }
+        isInLiveWidthChange = false
+        liveEstimatedScrollHeight = false
+        guard let scrollView = enclosingScrollView else { return }
+        pendingFullLayoutMeasure = true
+        recalcOverscroll(for: scrollView, targetWidth: frame.width, debugTag: "widthSettle")
+        (delegate as? NativeTextViewCoordinator)?.refreshCodeBlocksAfterWidthChange(in: self)
+    }
+
+    /// Mid-drag height of a `.fitsContent` view whose bottom is out of sight
+    /// (it extends below the visible part of its window): lay out only down to
+    /// the visible bottom plus a margin — those positions are exact, TextKit lays
+    /// out top-down — and extrapolate the rest from the laid-out text density.
+    /// Only the height of the unseen part is an estimate; the settle pass measures
+    /// it exactly. Returns nil when the bottom is visible (then everything above
+    /// it must be laid out anyway) or nothing useful can be estimated.
+    func estimatedLiveContentHeight() -> CGFloat? {
+        guard isInLiveWidthChange else { return nil }
+        // A scrolling editor: the height only sizes the scroller mid-drag. Scale the
+        // last height by the width ratio and let TextKit's viewport layout draw the
+        // visible part — no full-document layout per frame (a 39K-char note paid
+        // ~65 ms per width change for it).
+        if configuration.heightBehavior == .scrolls {
+            guard baseContentHeight > 0, liveWidthBaseWidth > 0, frame.width > 0 else { return nil }
+            return ceil(baseContentHeight * liveWidthBaseWidth / frame.width)
+        }
+        guard configuration.heightBehavior == .fitsContent,
+              let tlm = textLayoutManager, let tcm = tlm.textContentManager,
+              let storage = textStorage, storage.length > 0, window != nil else { return nil }
+        let visible = visibleRect
+        guard !visible.isEmpty else { return nil }
+        let margin: CGFloat = 200
+        let laidOutBottom = visible.maxY + margin - textContainerInset.height
+        // Bottom (with margin) inside the view → no saving; measure exactly.
+        guard laidOutBottom < bounds.height - textContainerInset.height * 2 else { return nil }
+        tlm.ensureLayout(for: CGRect(x: 0, y: 0, width: bounds.width, height: max(laidOutBottom, 1)))
+        var maxY: CGFloat = 0
+        var endOffset = 0
+        tlm.enumerateTextLayoutFragments(from: tlm.documentRange.location, options: []) { fragment in
+            guard fragment.state == .layoutAvailable else { return false }
+            maxY = max(maxY, fragment.layoutFragmentFrame.maxY)
+            endOffset = tcm.offset(from: tlm.documentRange.location, to: fragment.rangeInElement.endLocation)
+            return fragment.layoutFragmentFrame.maxY < laidOutBottom
+        }
+        let total = storage.length
+        guard maxY > 0, endOffset > 0 else { return nil }
+        if endOffset >= total { return nil }   // everything is laid out anyway: measure exactly
+        let estimate = maxY * CGFloat(total) / CGFloat(endOffset)
+        return ceil(max(estimate, maxY) + textContainerInset.height * 2)
     }
 
     /// Schedules against both modes AppKit uses while resizing so table

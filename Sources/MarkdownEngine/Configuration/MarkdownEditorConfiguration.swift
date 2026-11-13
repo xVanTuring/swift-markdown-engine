@@ -104,6 +104,9 @@ public struct MarkdownEditorConfiguration: Sendable {
     /// Cell selection, row / column grips and Delete behavior on a table being
     /// edited in place. Needs ``editsTablesInPlace``.
     public var tableInteraction: TableInteractionStyle
+    /// How rendered tables look (fork: xVanTuring). `.grid` (default) is the
+    /// bordered grid; `.rounded` is a rounded panel with row rules only.
+    public var tableAppearance: TableAppearance = .grid
 
     public init(
         theme: MarkdownEditorTheme = .default,
@@ -586,6 +589,55 @@ public struct TableInteractionStyle: Sendable {
     }
 
     public static let `default` = TableInteractionStyle()
+}
+
+// MARK: - Table appearance (fork: xVanTuring)
+
+/// The look of a rendered (inactive) table.
+public enum TableAppearance: Sendable, Equatable {
+    /// Every cell boxed by a hairline grid; the header row lightly tinted.
+    case grid
+    /// One softly tinted rounded panel without an outer border: a smaller,
+    /// semibold header with short dividers between its titles and a rule under
+    /// it, body rows separated by thin rules only (no vertical lines). A wide
+    /// table scrolls inside the panel, its visible edges rounded.
+    case rounded
+
+    /// Spacing that the renderer, the cell geometry and the in-place cell
+    /// editor must agree on.
+    struct Metrics {
+        /// Left / right padding inside a cell.
+        let cellHorizontal: CGFloat
+        /// Top / bottom padding inside a header cell and a body cell.
+        let headerVertical: CGFloat
+        let bodyVertical: CGFloat
+        /// Space between the table's edge and its first / last column, top row, last row.
+        let outerHorizontal: CGFloat
+        let outerTop: CGFloat
+        let outerBottom: CGFloat
+        /// Header type size relative to the body.
+        let headerScale: CGFloat
+        let cornerRadius: CGFloat
+
+        func vertical(row: Int) -> CGFloat { row == 0 ? headerVertical : bodyVertical }
+    }
+
+    /// Corner radius of the table panel (0 for `.grid`): an embedder that
+    /// scrolls a wide table image clips the visible part to it.
+    public var cornerRadius: CGFloat { metrics.cornerRadius }
+
+    var metrics: Metrics {
+        switch self {
+        case .grid:
+            return Metrics(cellHorizontal: 12, headerVertical: 6, bodyVertical: 6,
+                           outerHorizontal: 0, outerTop: 0, outerBottom: 0,
+                           headerScale: 1, cornerRadius: 0)
+        case .rounded:
+            return Metrics(cellHorizontal: 9, headerVertical: 7, bodyVertical: 4,
+                           outerHorizontal: 7, outerTop: 2, outerBottom: 6,
+                           headerScale: 0.86, cornerRadius: 10)
+        }
+    }
 }
 
 // MARK: - LaTeX

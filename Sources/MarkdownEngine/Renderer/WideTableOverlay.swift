@@ -45,6 +45,7 @@ final class WideTableOverlay: NSScrollView {
         didSet {
             guard abs(contentInsets.left - leftContentInset) > 0.5 else { return }
             contentInsets = NSEdgeInsets(top: 0, left: leftContentInset, bottom: 0, right: 0)
+            updatePanelMask()
         }
     }
 
@@ -115,6 +116,38 @@ final class WideTableOverlay: NSScrollView {
             contentView.scroll(to: NSPoint(x: origin.x, y: 0))
             reflectScrolledClipView(contentView)
         }
+        updatePanelMask()
+    }
+
+    /// `.rounded` tables (fork): the visible part of the table keeps the
+    /// panel's rounded corners while the table scrolls inside it — without
+    /// this the cut-off edge would be square. The clip view is trimmed to the
+    /// table's height (the scroller strip below it is a few points taller than
+    /// the scroller) and rounds its own corners. Not applied in reading-width
+    /// breakout, where the table starts at a scrollable inset.
+    func updatePanelMask() {
+        let radius = tableImageView.image?.tableGeometry?.style.metrics.cornerRadius ?? 0
+        guard radius > 0, leftContentInset < 0.5, let image = tableImageView.image else {
+            if let layer = contentView.layer, layer.cornerRadius != 0 {
+                layer.cornerRadius = 0
+                layer.masksToBounds = false
+            }
+            return
+        }
+        var clip = contentView.frame
+        let height = min(image.size.height, bounds.height)
+        if abs(clip.height - height) > 0.25 {
+            if !isFlipped { clip.origin.y = clip.maxY - height }
+            clip.size.height = height
+            contentView.frame = clip
+        }
+        contentView.wantsLayer = true
+        guard let layer = contentView.layer else { return }
+        if layer.cornerRadius != radius {
+            layer.cornerRadius = radius
+            layer.cornerCurve = .continuous
+        }
+        if !layer.masksToBounds { layer.masksToBounds = true }
     }
 
     /// Who a trackpad gesture scrolls: the table, or the document around it.
@@ -182,6 +215,7 @@ final class WideTableOverlay: NSScrollView {
         if tableImageView.image !== image {
             tableImageView.image = image
             tableImageView.frame = CGRect(origin: .zero, size: image.size)
+            updatePanelMask()
         }
     }
 
