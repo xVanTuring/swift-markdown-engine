@@ -225,6 +225,31 @@ final class TableCellEditorView: NSTextView {
         return abs(lineY(at: NSMaxRange(selectedRange())) - lineY(at: length)) < 1
     }
 
+    /// (fork: xVanTuring) The caret position for a point in this view, from the
+    /// editor's own layout manager. Not `characterIndexForInsertion(at:)`: AppKit
+    /// resolves that through the window point and can land on the document view
+    /// underneath, asking its text container for a `layoutManager` — which
+    /// silently switches the TextKit 2 document view to TextKit 1 (rendered
+    /// formulas, list markers and tables stop drawing, scrolling breaks).
+    func caretIndex(at point: NSPoint) -> Int {
+        let length = (string as NSString).length
+        guard length > 0, let lm = layoutManager, let tc = textContainer else { return length }
+        lm.ensureLayout(for: tc)
+        let inContainer = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        var fraction: CGFloat = 0
+        let glyph = lm.glyphIndex(for: inContainer, in: tc, fractionOfDistanceThroughGlyph: &fraction)
+        let chars = lm.characterRange(forGlyphRange: NSRange(location: glyph, length: 1), actualGlyphRange: nil)
+        // Past the glyph's middle, or past the end of its line: after it.
+        let lineRect = lm.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+        let after = fraction > 0.5 || inContainer.x > lineRect.maxX
+        let index = after ? NSMaxRange(chars) : chars.location
+        // A line break is not a place to stand after: keep the caret on its line.
+        if after, index > 0, index <= length, (string as NSString).character(at: index - 1) == 0x0A {
+            return index - 1
+        }
+        return min(max(index, 0), length)
+    }
+
     /// Width of the longest line on one row, padding included.
     func requiredWidth(of text: String? = nil) -> CGFloat {
         let attributes: [NSAttributedString.Key: Any] = [.font: font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)]
@@ -414,7 +439,7 @@ extension NativeTextView {
         if selectAll {
             editor.selectAll(nil)
         } else if let clickPoint, editor.superview === self {
-            let index = editor.characterIndexForInsertion(at: editor.convert(clickPoint, from: self))
+            let index = editor.caretIndex(at: editor.convert(clickPoint, from: self))
             editor.setSelectedRange(NSRange(location: min(index, (editor.string as NSString).length), length: 0))
         } else {
             editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))

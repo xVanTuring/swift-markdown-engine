@@ -81,6 +81,41 @@ struct TableCellEditingTests {
         #expect(!tv.beginTableCellEditing(tableStart: Self.tableStart, row: 1, column: 0))
     }
 
+    // MARK: Caret from a click (fork: xVanTuring)
+
+    /// The caret for a click inside the cell comes from the editor's own layout
+    /// manager: left of the text is the start, right of it the end, the middle
+    /// somewhere inside — and the document view stays on TextKit 2.
+    /// (`characterIndexForInsertion(at:)` on the editor switched the document
+    /// view to TextKit 1 in a real window: formulas, list markers and tables
+    /// stopped drawing and scrolling broke.)
+    @Test func clickCaretComesFromTheEditorAndKeepsTextKit2() throws {
+        let doc = "| 协议 | 说明 |\n| --- | --- |\n| GBN | 累积确认，从出错帧起全部重发 |\n"
+        let (tv, coordinator) = makeEditor(doc); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 1))
+        let editor = try #require(tv.tableEditSession?.editor)
+        let length = (editor.string as NSString).length
+        #expect(editor.caretIndex(at: NSPoint(x: -50, y: editor.bounds.midY)) == 0)
+        #expect(editor.caretIndex(at: NSPoint(x: editor.bounds.maxX + 200, y: editor.bounds.midY)) == length)
+        let middle = editor.caretIndex(at: NSPoint(x: editor.bounds.midX, y: editor.bounds.midY))
+        #expect(middle > 0 && middle < length)
+        #expect(tv.textLayoutManager != nil)
+    }
+
+    /// A line break inside a cell is not a place to stand after: a click right
+    /// of the first line puts the caret at that line's end.
+    @Test func clickRightOfALineStaysOnThatLine() throws {
+        let doc = "| a |\n| --- |\n| one<br>two |\n"
+        let (tv, coordinator) = makeEditor(doc); defer { withExtendedLifetime(coordinator) {} }
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 0))
+        let editor = try #require(tv.tableEditSession?.editor)
+        #expect(editor.string == "one\ntwo")
+        let firstLineY = editor.firstRect(forCharacterRange: NSRange(location: 0, length: 1), actualRange: nil)
+        let inEditor = editor.convert(editor.window?.convertFromScreen(firstLineY).origin ?? .zero, from: nil)
+        let index = editor.caretIndex(at: NSPoint(x: editor.bounds.maxX + 200, y: inEditor.y - 2))
+        #expect(index == 3)
+    }
+
     // MARK: Row / column operations in the editor
 
     private static let wide = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |"
