@@ -337,16 +337,26 @@ extension MarkdownStyler {
     /// inline parsing runs) — so a cell holding `` `a \\| b` `` is one cell, not
     /// two. Splitting on the raw character silently truncated such a row to the
     /// header's column count.
+    ///
+    /// A `|` inside a `$…$` formula doesn't split either (fork): absolute values and
+    /// determinants are written `$|A|$`, and GFM's strict split cut `转置 $|A^T|$` into
+    /// `转置 $` / `A^T` / `$`. Formulas are found by the inline parser's own rules, so
+    /// prices such as `$5 | $10` still split.
     private static func parseTableRow(_ line: String) -> [String] {
         var s = Substring(line.trimmingCharacters(in: .whitespaces))
         if s.hasPrefix("|") { s = s.dropFirst() }
         if s.hasSuffix("|"), !s.dropLast().hasSuffix("\\") { s = s.dropLast() }
 
+        let math = InlineParser.inlineMathRanges(in: String(s))
+        var offset = 0   // UTF-16 offset of `ch` in `s`
         var cells: [String] = []
         var current = ""
         var escaped = false
         for ch in s {
-            if escaped {
+            defer { offset += ch.utf16.count }
+            if !escaped, ch == "|", math.contains(where: { NSLocationInRange(offset, $0) }) {
+                current.append(ch)
+            } else if escaped {
                 // Only the delimiter escape is resolved here; every other `\x`
                 // stays intact so inline parsing still owns its own escapes.
                 if ch == "|" { current.append("|") } else { current.append("\\"); current.append(ch) }

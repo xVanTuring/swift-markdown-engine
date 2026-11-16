@@ -470,7 +470,10 @@ enum MarkdownASTStyler {
         }
         let lineHeight = ctx.baseLineHeight + ctx.config.lists.extraLineHeight
         ps.minimumLineHeight = lineHeight
-        ps.maximumLineHeight = lineHeight
+        // A `$…$` taller than the text (a determinant, a fraction) grows its line through the
+        // hidden `$` markers (`styleInlineLatex`); a capped line can't, and the formula ran into
+        // the items above and below. Lines without one keep the even list rhythm.
+        ps.maximumLineHeight = inlineLatexRanges(in: item.inlines).isEmpty ? lineHeight : 0
         ps.lineSpacing = 0
         ps.paragraphSpacing = ctx.baseParagraphSpacing
         ps.paragraphSpacingBefore = 0
@@ -684,7 +687,7 @@ enum MarkdownASTStyler {
             styleInlines(inlines, font: headingFont, ctx: ctx, into: &attrs)
 
         case .blockquote(let range, let inlines):
-            styleBlockquote(range: range, ctx: ctx, into: &attrs)
+            styleBlockquote(range: range, latexRanges: inlineLatexRanges(in: inlines), ctx: ctx, into: &attrs)
             styleInlines(inlines, font: font, ctx: ctx, into: &attrs)
 
         case .list(_, let items):
@@ -734,8 +737,23 @@ enum MarkdownASTStyler {
         styleInlines(node.inlines, font: font, ctx: ctx, into: &attrs)
     }
 
+    /// Ranges of every `$…$` in `nodes`, nested ones (inside emphasis, links, extensions) included.
+    static func inlineLatexRanges(in nodes: [InlineNode]) -> [NSRange] {
+        var ranges: [NSRange] = []
+        for node in nodes {
+            switch node {
+            case .inlineLatex(let range, _, _): ranges.append(range)
+            case .emphasis(_, _, _, let children), .link(_, _, _, _, let children):
+                ranges += inlineLatexRanges(in: children)
+            case .ext(let ext): ranges += inlineLatexRanges(in: ext.children)
+            case .text, .code, .image, .wikiLink, .imageEmbed, .escape: break
+            }
+        }
+        return ranges
+    }
+
     /// Per-line blockquote: indent, mute content, hide/show `>` markers, tag first char with bar level.
-    private static func styleBlockquote(range: NSRange, ctx: Ctx, into attrs: inout [StyledRange]) {
+    private static func styleBlockquote(range: NSRange, latexRanges: [NSRange], ctx: Ctx, into attrs: inout [StyledRange]) {
         let indentPerLevel = MarkdownTextLayoutFragment.blockquoteIndentPerLevel
         var lineStart = range.location
         let end = NSMaxRange(range)
@@ -772,7 +790,9 @@ enum MarkdownASTStyler {
             para.headIndent = textIndent
             let lineHeight = ctx.baseLineHeight + ctx.config.blockquote.extraLineHeight
             para.minimumLineHeight = lineHeight
-            para.maximumLineHeight = lineHeight
+            // Uncapped where a `$…$` sits, so a tall formula can grow the line (see `styleListItem`).
+            let lineHasLatex = latexRanges.contains { NSIntersectionRange($0, line).length > 0 }
+            para.maximumLineHeight = lineHasLatex ? 0 : lineHeight
             // Inner quote lines stay tight (0); the LAST line gets the normal
             para.paragraphSpacing = (lineEnd >= end) ? ctx.baseParagraphSpacing : 0
             para.paragraphSpacingBefore = 0
@@ -900,7 +920,7 @@ enum MarkdownASTStyler {
                 styleLink(range: range, textRange: textRange, url: url, markers: markers, children: children, font: font, ctx: ctx, into: &attrs)
 
             case .wikiLink(let range, let name, _, let markers):
-                styleWikiLink(range: range, name: name, markers: markers, ctx: ctx, into: &attrs)
+                styleWikiLink(range: range, name: name, markers: markers, font: font, ctx: ctx, into: &attrs)
 
             case .image, .imageEmbed, .inlineLatex, .escape:
                 break   // ported in later increments
@@ -937,7 +957,7 @@ enum MarkdownASTStyler {
     }
 
     private static func styleWikiLink(
-        range: NSRange, name: NSRange, markers: [NSRange], ctx: Ctx, into attrs: inout [StyledRange]
+        range: NSRange, name: NSRange, markers: [NSRange], font: NSFont, ctx: Ctx, into attrs: inout [StyledRange]
     ) {
         attrs.append((range, [.spellingState: 0]))
         let nodeName = ctx.ns.substring(with: name)
@@ -946,9 +966,25 @@ enum MarkdownASTStyler {
         if let linkID { contentAttrs[.wikiLinkID] = linkID }
         if !ctx.isActive(range) {
             // Resolve by the stable UUID when present 
-            let exists = ctx.config.services.wikiLinks.resolve(displayName: linkID ?? nodeName, range: name)?.exists ?? false
-            if exists {
+            let resolution = ctx.config.services.wikiLinks.resolve(displayName: linkID ?? nodeName, range: name)
+            if resolution?.exists ?? false {
                 contentAttrs[.link] = linkID ?? nodeName
+                if let toolTip = resolution?.toolTip, !toolTip.isEmpty { contentAttrs[.toolTip] = toolTip }
+                if let display = resolution?.displayText, !display.isEmpty, name.length > 0, display != nodeName {
+                    // Show the resolver's shorter text (`p.152` for `Book#page=152`) instead of the
+                    // name: hidden by SIZE like every other marker (a clear colour comes back under
+                    // a selection), kerned out to the display width, painted by the fragment.
+                    // The whole width rides on the FIRST character (as inline formulas do): a CJK name
+                    // may wrap between any two characters, and the drawn text must stay on the line
+                    // that holds its room.
+                    let hiddenW = (nodeName as NSString).size(withAttributes: [.font: ctx.inlineMarkerFont]).width
+                    let displayW = (display as NSString).size(withAttributes: [.font: font]).width
+                    contentAttrs[.font] = ctx.inlineMarkerFont
+                    contentAttrs[.foregroundColor] = NSColor.clear
+                    contentAttrs[.wikiLinkDisplay] = display
+                    contentAttrs[.wikiLinkDisplayFont] = font
+                    attrs.append((NSRange(location: name.location, length: 1), [.kern: displayW - hiddenW]))
+                }
             } else {
                 contentAttrs[.foregroundColor] = ctx.theme.disabledText
             }

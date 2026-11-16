@@ -394,7 +394,12 @@ struct InlineParserTests {
         for source in ["$|x|$", "$|AB|$", "$|A'|$", "$|f(x)|$", "$|3|$", "$||v||$", "$| A |$"] {
             #expect(spans(source).latex == [source], "\(source)")
         }
-        for source in ["$|ok so|$", "$||$", "$|abcd|$", "$|x$", "$|x|y|$"] {
+        // A coefficient tight in front: `$k|A|$`, `$2|x|$`.
+        #expect(spans("则 $|kA| = k^n|A|$，取 $k|A|$ 时").latex == ["$|kA| = k^n|A|$", "$k|A|$"])
+        for source in ["$k|A|$", "$2|x|$", "$ab|B|$", "$1.5||v||$", "$k |A|$"] {
+            #expect(spans(source).latex == [source], "\(source)")
+        }
+        for source in ["$|ok so|$", "$||$", "$|abcd|$", "$|x$", "$|x|y|$", "$abcd|A|$", "$ok so|A|$"] {
             #expect(spans(source).latex.isEmpty, "\(source)")
         }
     }

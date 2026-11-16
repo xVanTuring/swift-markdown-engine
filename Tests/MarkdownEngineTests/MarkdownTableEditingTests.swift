@@ -44,6 +44,29 @@ struct MarkdownTableEditingTests {
         #expect(try parse(out).rows[0][0] == "a | b")
     }
 
+    @Test("a pipe inside a $…$ formula stays in its cell")
+    func pipeInsideFormula() throws {
+        let table = try parse(#"""
+        | 运算 | 行列式 | 依据 |
+        |---|---|---|
+        | 转置 $|A^{\mathrm{T}}|$ | $|A|$ | 性质 1（[[线代#page=22]]） |
+        | 乘积 $|AB|$ | $|A|\,|B| = |B|\,|A| = |BA|$ | 行列式的值 |
+        | 逆 $|A^{-1}|$ | $|A|^{-1} = \dfrac{1}{|A|}$ | 倒数关系 |
+        | 价格 | $5 | $10 |
+        """#)
+        #expect(table.rows[0] == [#"转置 $|A^{\mathrm{T}}|$"#, "$|A|$", "性质 1（[[线代#page=22]]）"])
+        #expect(table.rows[1] == [#"乘积 $|AB|$"#, #"$|A|\,|B| = |B|\,|A| = |BA|$"#, "行列式的值"])
+        #expect(table.rows[2] == [#"逆 $|A^{-1}|$"#, #"$|A|^{-1} = \dfrac{1}{|A|}$"#, "倒数关系"])
+        // Prices are not a formula: the bar between them still splits.
+        #expect(table.rows[3] == ["价格", "$5", "$10"])
+
+        // Written back bare, not as `\|`, and parsed to the same cells.
+        let edited = table.settingCell(row: 1, column: 1, to: "$k|A|$")
+        let out = edited.markdownSource()
+        #expect(out.contains("| $k|A|$ |"))
+        #expect(try parse(out).rows == edited.rows)
+    }
+
     @Test("an existing escape is not escaped twice")
     func noDoubleEscape() {
         #expect(MarkdownStyler.ParsedTable.encodeCell("a \\| b") == "a \\| b")

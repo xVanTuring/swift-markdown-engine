@@ -525,6 +525,27 @@ enum InlineParser {
         )
     }
 
+    /// UTF-16 ranges of the `$…$` formulas in one line of text, by the same rules the inline
+    /// parser applies. A GFM table row is split on `|` before inline parsing runs, and math writes
+    /// `|` for absolute values and determinants (`$|A|$`, `$|A|\,|B|$`): the row splitter and the
+    /// cell serializer ask this so a bar inside a formula stays part of its cell.
+    static func inlineMathRanges(in line: String) -> [NSRange] {
+        let ns = line as NSString
+        let len = ns.length
+        var ranges: [NSRange] = []
+        var i = 0
+        while i < len {
+            if ns.character(at: i) == dollar, peek(ns, i + 1, len) != dollar, !isEscaped(i, ns),
+               case .inlineLatex(let range, _, _)? = matchInlineLatex(ns, len, start: i) {
+                ranges.append(range)
+                i = NSMaxRange(range)
+            } else {
+                i += 1
+            }
+        }
+        return ranges
+    }
+
     /// `$ math $` — single dollars, content has no `$`, passes the math heuristic.
     private static func matchInlineLatex(_ ns: NSString, _ len: Int, start i: Int) -> Span? {
         if i > 0, ns.character(at: i - 1) == dollar { return nil }
@@ -671,10 +692,17 @@ enum InlineParser {
     }
 
     /// Absolute value, determinant or norm of a bare operand — `|A|`, `|x|`, `|AB|`, `|f(x)|`, `|3|`,
-    /// `||v||` — which has no operator for the heuristic to count. Only one operand between the bars,
-    /// so prose such as `$|ok so|$` stays literal.
+    /// `||v||` — which has no operator for the heuristic to count, optionally scaled by a coefficient
+    /// written tight in front: `k|A|`, `2|x|` (`|kA| = |k|^n|A|` notes). Only one operand between the
+    /// bars and a 1–3 letter or numeric coefficient, so prose such as `$|ok so|$` stays literal.
     private static func isAbsoluteValue(_ s: String) -> Bool {
-        var inner = Substring(s)
+        guard let bar = s.firstIndex(of: "|") else { return false }
+        let coefficient = s[..<bar].trimmingCharacters(in: .whitespaces)
+        if !coefficient.isEmpty {
+            guard (coefficient.count <= 3 && isAllAsciiLetters(coefficient)) || isPlainNumber(coefficient)
+            else { return false }
+        }
+        var inner = s[bar...]
         for _ in 0..<2 {
             guard inner.count >= 3, inner.first == "|", inner.last == "|" else { break }
             inner = inner.dropFirst().dropLast()

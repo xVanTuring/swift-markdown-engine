@@ -53,10 +53,18 @@ public struct WikiLinkResolution: Sendable, Equatable {
     public let id: String
     /// Whether the linked target currently exists/is reachable.
     public let exists: Bool
+    /// Shorter text to SHOW in place of the link's name while the caret is out of it
+    /// (`[[Book#page=152]]` → `p.152`); nil shows the name as written. Display only:
+    /// the source is untouched, and the caret reveals it as usual.
+    public let displayText: String?
+    /// Hover text for the link (`.toolTip`), e.g. the full target a `displayText` shortens away.
+    public let toolTip: String?
 
-    public init(id: String, exists: Bool) {
+    public init(id: String, exists: Bool, displayText: String? = nil, toolTip: String? = nil) {
         self.id = id
         self.exists = exists
+        self.displayText = displayText
+        self.toolTip = toolTip
     }
 }
 

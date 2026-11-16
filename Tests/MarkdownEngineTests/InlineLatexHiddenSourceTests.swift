@@ -20,6 +20,11 @@ struct InlineLatexHiddenSourceTests {
 
     private struct StubRenderer: LatexRenderer {
         func render(latex: String, fontSize: CGFloat, theme: MarkdownEditorTheme) -> LatexRenderResult? {
+            // `\tall` stands in for a determinant or a fraction: far taller than the text.
+            if latex.hasPrefix("\\tall") {
+                let size = CGSize(width: 40, height: 48)
+                return LatexRenderResult(image: NSImage(size: size), size: size, baselineOffset: 18)
+            }
             let size = CGSize(width: 20, height: 10)
             return LatexRenderResult(image: NSImage(size: size), size: size, baselineOffset: -2)
         }
@@ -115,6 +120,26 @@ struct InlineLatexHiddenSourceTests {
             let b = try line(at: withText, in: tv)
             #expect(abs(a.baseline - b.baseline) < 0.5, "\(text.debugDescription): baseline \(a.baseline) vs \(b.baseline)")
             #expect(abs(a.height - b.height) < 0.5, "\(text.debugDescription): line height \(a.height) vs \(b.height)")
+        }
+    }
+
+    @Test("a tall formula grows a list item or quote line, as it does a paragraph line")
+    func tallFormulaGrowsCappedLines() throws {
+        // List items and quote lines pin their line height for an even rhythm; a pinned
+        // line could not grow, and a determinant ran into the items above and below.
+        for (text, tall, plain) in [
+            ("ab $\\tall$\n\nend", 4, 0),
+            ("- ab $\\tall$\n- ab\n\nend", 6, 15),
+            ("1. ab $\\tall$\n2. ab\n\nend", 7, 17),
+            ("> ab $\\tall$\n> ab\n\nend", 6, 15),
+        ] {
+            let (tv, _) = makeTextView(text)
+            let grown = try line(at: tall, in: tv)
+            let normal = try line(at: plain, in: tv)
+            #expect(grown.height >= 47, "\(text.debugDescription): formula line is \(grown.height)pt")
+            if plain > 0 {
+                #expect(normal.height < 30, "\(text.debugDescription): plain line is \(normal.height)pt")
+            }
         }
     }
 }

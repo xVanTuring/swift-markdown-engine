@@ -22,15 +22,22 @@ extension MarkdownStyler.ParsedTable {
     /// kept — leading, trailing and repeated ones too — since each is a visible
     /// line in the cell; only spaces and tabs at the edges are trimmed.
     static func encodeCell(_ text: String) -> String {
+        // A `|` inside a `$…$` formula is written bare (`$|A|$`): the row splitter keeps it in its cell.
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        let math = InlineParser.inlineMathRanges(in: trimmed)
+        var offset = 0   // UTF-16 offset of `ch` in `trimmed`
         var out = ""
         var escaped = false
-        for ch in text.trimmingCharacters(in: .whitespaces) {
+        for ch in trimmed {
+            defer { offset += ch.utf16.count }
             if escaped {
                 out.append(ch)
                 escaped = false
             } else if ch == "\\" {
                 out.append(ch)
                 escaped = true
+            } else if ch == "|", math.contains(where: { NSLocationInRange(offset, $0) }) {
+                out.append(ch)
             } else if ch == "|" {
                 out.append("\\|")
             } else if ch.isNewline {

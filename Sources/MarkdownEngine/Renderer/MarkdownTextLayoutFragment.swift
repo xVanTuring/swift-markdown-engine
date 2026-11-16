@@ -35,6 +35,11 @@ extension NSAttributedString.Key {
     /// the fragment can paint a `•` in its place. Set to `true`.
     static let bulletMarker = NSAttributedString.Key("BulletListMarker")
     static let orderedMarker = NSAttributedString.Key("OrderedListMarker")
+    /// String — a resolved wiki-link's display text (`WikiLinkResolution.displayText`),
+    /// painted over its name, which the styler shrank and kerned to the text's width.
+    static let wikiLinkDisplay = NSAttributedString.Key("WikiLinkDisplay")
+    /// NSFont — the font `.wikiLinkDisplay` is drawn in (the run's own font before it was hidden).
+    static let wikiLinkDisplayFont = NSAttributedString.Key("WikiLinkDisplayFont")
     /// CGFloat — natural image width; presence flags block as overlay-rendered.
     static let scrollableBlockNaturalWidth = NSAttributedString.Key("ScrollableBlockNaturalWidth")
     /// Int — hash of source text; key for overlay reconcile + offset persistence.
@@ -185,6 +190,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         // 4b. Bullet glyphs (on top of hidden -/*/+ markers)
         drawBulletMarkers(at: point, in: context)
         drawOrderedMarkers(at: point, in: context)
+        drawWikiLinkDisplays(at: point, in: context)
 
         // 5. Thematic breaks (full-width line, painted last so it doesn't
         //    fight with anything that already drew at the line's center)
@@ -947,6 +953,40 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
             let glyphAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: theme.bodyText]
             let topY = pos.baselineY - font.ascender
             glyph.draw(at: CGPoint(x: pos.x, y: topY), withAttributes: glyphAttrs)
+        }
+    }
+
+    // MARK: - Wiki-link display text
+
+    /// Paint a wiki-link's display text (`.wikiLinkDisplay`) over its hidden name, in the
+    /// link colour and underlined like a link. The name runs at the near-zero hidden-marker
+    /// font (so a selection can't repaint it) kerned out to this text's width, which keeps
+    /// the click target, the selection highlight and line wrapping the size of what is drawn.
+    private func drawWikiLinkDisplays(at point: CGPoint, in context: CGContext) {
+        guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+
+        let textView = textLayoutManager?.textContainer?.textView
+        let theme = (textView as? NativeTextView)?.configuration.theme ?? .default
+        let baseFont = (textView as? NativeTextView)?.baseFont
+            ?? textView?.font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+
+        ts.enumerateAttribute(.wikiLinkDisplay, in: range, options: []) { [weak self] value, attrRange, _ in
+            guard let self, let text = value as? String else { return }
+            guard let pos = self.drawPosition(forDocumentCharAt: attrRange.location, point: point) else { return }
+            // The display font is stored next to the text: a link inside a heading or bold
+            // run keeps that run's size and weight.
+            let font = (ts.attribute(.wikiLinkDisplayFont, at: attrRange.location, effectiveRange: nil) as? NSFont)
+                ?? baseFont
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: theme.link,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+            ]
+            (text as NSString).draw(at: CGPoint(x: pos.x, y: pos.baselineY - font.ascender), withAttributes: attrs)
         }
     }
 
