@@ -388,6 +388,17 @@ struct InlineParserTests {
         }
     }
 
+    @Test("absolute values, determinants and norms of a bare operand are math")
+    func absoluteValuesAreLatex() {
+        #expect(spans("矩阵 $A$ 的行列式 $|A|$ 不为零").latex == ["$A$", "$|A|$"])
+        for source in ["$|x|$", "$|AB|$", "$|A'|$", "$|f(x)|$", "$|3|$", "$||v||$", "$| A |$"] {
+            #expect(spans(source).latex == [source], "\(source)")
+        }
+        for source in ["$|ok so|$", "$||$", "$|abcd|$", "$|x$", "$|x|y|$"] {
+            #expect(spans(source).latex.isEmpty, "\(source)")
+        }
+    }
+
     @Test("one formula the heuristic misses no longer pairs the rest across Chinese prose")
     func chineseSentenceWithPrimes() {
         let source = #"它把 $y$、$y'$、$y''$ 用**常数**系数拼起来。这就要求 $y'$、$y''$ 和 $y$ 是"同一类东西""#

@@ -597,8 +597,7 @@ enum InlineParser {
         if hasBareCJK(trimmed) { return false }
         let mathyMatches = mathyCharCount(trimmed)
         if mathyMatches == 0 {
-            return (trimmed.count <= 3 && isAllAsciiLetters(trimmed)) || isPrimed(trimmed) || isFunctionNotation(trimmed)
-                || isNameList(trimmed)
+            return isBareOperand(trimmed) || isNameList(trimmed) || isAbsoluteValue(trimmed)
         }
         let tokenCount = trimmed.split(whereSeparator: { $0.isWhitespace }).count
         if mathyMatches >= 3 { return tokenCount <= 120 }
@@ -664,6 +663,25 @@ enum InlineParser {
         guard (1...3).contains(i), i < u.count else { return false }
         while i < u.count, u[i] == 0x27 { i += 1 }
         return i == u.count
+    }
+
+    /// An operand with no operator in it: a 1–3 letter name, a primed name or function notation.
+    private static func isBareOperand(_ s: String) -> Bool {
+        (s.count <= 3 && isAllAsciiLetters(s)) || isPrimed(s) || isFunctionNotation(s)
+    }
+
+    /// Absolute value, determinant or norm of a bare operand — `|A|`, `|x|`, `|AB|`, `|f(x)|`, `|3|`,
+    /// `||v||` — which has no operator for the heuristic to count. Only one operand between the bars,
+    /// so prose such as `$|ok so|$` stays literal.
+    private static func isAbsoluteValue(_ s: String) -> Bool {
+        var inner = Substring(s)
+        for _ in 0..<2 {
+            guard inner.count >= 3, inner.first == "|", inner.last == "|" else { break }
+            inner = inner.dropFirst().dropLast()
+            let operand = inner.trimmingCharacters(in: .whitespaces)
+            if !operand.isEmpty, isBareOperand(operand) || isPlainNumber(operand) { return true }
+        }
+        return false
     }
 
     /// Variables listed with commas — `x, y`, `a,b,c`, `x1, x2`, `y', z` — as running text names them
