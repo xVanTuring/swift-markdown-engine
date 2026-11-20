@@ -13,6 +13,7 @@ extension NativeTextView {
 
     override func mouseMoved(with event: NSEvent) {
         updateTableGrips(for: event)
+        updateTableLinkToolTips(atWindowPoint: event.locationInWindow)   // fork: xVanTuring
         if isOverTableGrip(event) {
             // A grip is a handle, not text: super would set the I-beam over it
             // on every move, beating the grip's own cursor (fork: xVanTuring).

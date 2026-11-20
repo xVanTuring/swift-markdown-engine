@@ -600,6 +600,11 @@ extension MarkdownStyler {
                     attributes[.foregroundColor] = theme.link
                     attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
                     attributes[.tableCellLink] = TableCellLink.wiki(key)
+                    // Hover text (`[[Book#page=12]]` → the book's name and page,
+                    // which `p.12` shortens away), as body text shows it.
+                    if let toolTip = resolution?.toolTip, !toolTip.isEmpty {
+                        attributes[.tableCellToolTip] = toolTip
+                    }
                 } else {
                     attributes[.foregroundColor] = theme.disabledText
                 }

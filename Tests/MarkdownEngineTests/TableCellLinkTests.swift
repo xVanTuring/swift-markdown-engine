@@ -87,6 +87,17 @@ struct TableCellLinkTests {
         #expect(s.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == Self.red)
     }
 
+    @Test func wikiLinkCarriesTheResolversHoverText() {
+        let name = "书#page=12"
+        let resolver = FixedResolver(known: [
+            name: WikiLinkResolution(id: "pdf:1#11", exists: true, displayText: "p.12", toolTip: "书 · 第 12 页"),
+        ])
+        let s = cell("[[\(name)]] 和 [[\(name)]]", wikiLinks: resolver)
+        #expect(s.attribute(.tableCellToolTip, at: 0, effectiveRange: nil) as? String == "书 · 第 12 页")
+        #expect(s.attribute(.tableCellToolTip, at: 5, effectiveRange: nil) == nil)   // the text between
+        #expect(cell("[[\(name)]]").attribute(.tableCellToolTip, at: 0, effectiveRange: nil) == nil)
+    }
+
     @Test func unknownWikiLinkIsGreyedAndNotClickable() {
         let s = cell("[[没有这篇]]", wikiLinks: FixedResolver(known: [:]))
         #expect(s.string == "没有这篇")
@@ -179,6 +190,49 @@ struct TableCellLinkTests {
         #expect(geometry.link(at: CGPoint(x: rect.midX, y: rect.midY)) == nil)
     }
 
+    // MARK: Hover texts
+
+    private func toolTipTable() throws -> NSImage {
+        _ = NSApplication.shared
+        let source = "| 题 | 出处 |\n|---|---|\n| [#1](https://a.com) | [[书#page=12]]、[[书#page=30]] |"
+        let parsed = try #require(MarkdownStyler.parseTableSource(source))
+        let resolver = FixedResolver(known: [
+            "书#page=12": WikiLinkResolution(id: "a", exists: true, displayText: "p.12", toolTip: "书 · 第 12 页"),
+            "书#page=30": WikiLinkResolution(id: "b", exists: true, displayText: "p.30", toolTip: "书 · 第 30 页"),
+        ])
+        return MarkdownStyler.renderTable(
+            parsed, baseFont: NSFont.systemFont(ofSize: 15), theme: theme(),
+            codeBackgroundColor: .clear, latex: MarkdownEditorConfiguration.default.services.latex,
+            appearance: NSAppearance(named: .aqua)!, availableWidth: 600, style: .rounded, wikiLinks: resolver)
+    }
+
+    private final class FlippedView: NSView { override var isFlipped: Bool { true } }
+
+    /// One rect per link that has a hover text, where its text is drawn —
+    /// shifted by the image's place in a flipped view, mirrored in an unflipped one.
+    @Test func hoverTextsAreRegisteredOverTheirLinks() throws {
+        let image = try toolTipTable()
+        let geometry = try #require(image.tableGeometry)
+        let runs = geometry.linkRuns().filter { $0.toolTip != nil }
+        #expect(runs.map(\.toolTip) == ["书 · 第 12 页", "书 · 第 30 页"])
+
+        let flipped = FlippedView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
+        let tips = TableLinkToolTips()
+        tips.show(geometry, at: CGPoint(x: 10, y: 20), in: flipped)
+        #expect(tips.registered.map(\.text) == ["书 · 第 12 页", "书 · 第 30 页"])
+        #expect(tips.registered.map(\.rect) == runs.map { $0.rect.offsetBy(dx: 10, dy: 20) })
+        tips.show(geometry, at: CGPoint(x: 10, y: 20), in: flipped)   // same place: left alone
+        #expect(tips.registered.count == 2)
+        tips.clear(in: flipped)
+        #expect(tips.registered.isEmpty)
+
+        let unflipped = NSView(frame: NSRect(origin: .zero, size: image.size))
+        tips.show(geometry, at: .zero, in: unflipped)
+        let first = try #require(tips.registered.first?.rect)
+        #expect(first.minY == image.size.height - runs[0].rect.maxY)
+        #expect(first.minX == runs[0].rect.minX)
+    }
+
     @Test func tableWithoutLinksKeepsNoCellText() throws {
         let image = try render("| a | b |\n|---|---|\n| **1** | `2` |", width: 400, style: .rounded)
         #expect(image.tableGeometry?.linkCells.isEmpty == true)
@@ -225,6 +279,7 @@ struct TableCellLinkTests {
         configuration.editsTablesInPlace = true
         configuration.services.wikiLinks = FixedResolver(known: [
             "笔记甲": WikiLinkResolution(id: "a", exists: true),
+            "书#page=12": WikiLinkResolution(id: "b", exists: true, displayText: "p.12", toolTip: "书 · 第 12 页"),
         ])
         let textView = NativeTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         textView.isEditable = true
@@ -274,6 +329,39 @@ struct TableCellLinkTests {
         #expect(tv.textLayoutManager != nil)
     }
 
+    /// Over a narrow table the hover texts of its links are registered; away
+    /// from it, cleared.
+    @Test func hoverTextsFollowThePointerInTheView() throws {
+        let doc = "intro\n\n| 题 | 出处 |\n| --- | --- |\n| x | [[书#page=12]] |\n\noutro\n"
+        let (tv, coordinator, window) = makeEditor(doc)
+        defer { withExtendedLifetime((coordinator, window)) {} }
+        let point = try linkPoint(tv, tableStart: 7)
+        tv.updateTableLinkToolTips(atWindowPoint: tv.convert(point, to: nil))
+        #expect(tv.tableLinkToolTips.registered.map(\.text) == ["书 · 第 12 页"])
+        let rect = try #require(tv.tableLinkToolTips.registered.first?.rect)
+        #expect(rect.contains(point))
+        tv.updateTableLinkToolTips(atWindowPoint: tv.convert(NSPoint(x: point.x, y: 2), to: nil))
+        #expect(tv.tableLinkToolTips.registered.isEmpty)
+    }
+
+    // MARK: Read-only display renderer
+
+    @Test func displayRendererListsTableLinks() throws {
+        _ = NSApplication.shared
+        let source = "| 题 | 出处 |\n|---|---|\n| [#42](unireader://open?doc=1) | [[笔记 甲]] |"
+        let style = MarkdownDisplayStyle(configuration: .default, font: .systemFont(ofSize: 14))
+        let image = try #require(MarkdownDisplayRenderer.tableImage(
+            source: source, style: style, availableWidth: 600, appearance: NSAppearance(named: .aqua)!))
+        let links = MarkdownDisplayRenderer.tableLinks(in: image)
+        #expect(links.count == 2)
+        #expect(links.first?.url == URL(string: "unireader://open?doc=1"))
+        let wiki = try #require(links.last)
+        #expect(MarkdownDisplayRenderer.wikiLinkTarget(wiki.url) == "笔记 甲")
+        #expect(MarkdownDisplayRenderer.tableLink(in: image, at: CGPoint(x: wiki.rect.midX, y: wiki.rect.midY)) == wiki.url)
+        #expect(MarkdownDisplayRenderer.tableLink(in: image, at: CGPoint(x: 1, y: 1)) == nil)
+        #expect(MarkdownDisplayRenderer.tableLinks(in: NSImage(size: NSSize(width: 10, height: 10))).isEmpty)
+    }
+
     @Test func openingAWikiLinkGoesThroughOnLinkClick() async throws {
         var clicked: [String] = []
         let doc = "| a |\n| --- |\n| [[笔记甲]] |\n"
@@ -284,6 +372,29 @@ struct TableCellLinkTests {
         tv.openTableLink(link)
         try await Task.sleep(for: .milliseconds(50))
         #expect(clicked == ["笔记甲"])
+    }
+
+    /// A press on a link follows it when released over the same link, not
+    /// when released elsewhere; an Option-press is left to the cell.
+    /// (The tracking loop between press and release reads the event queue,
+    /// which a posted event never reaches under Swift Testing — the release is
+    /// handed in directly.)
+    @Test func pressOnATableLinkFollowsItOnlyWhenReleasedOnIt() async throws {
+        var clicked: [String] = []
+        let doc = "| a | b |\n| --- | --- |\n| [[笔记甲]] | x |\n"
+        let (tv, coordinator, window) = makeEditor(doc) { clicked.append($0) }
+        defer { withExtendedLifetime((coordinator, window)) {} }
+        let on = tv.convert(try linkPoint(tv, tableStart: 0), to: nil)
+        #expect(!tv.finishTableLinkPress(.wiki("笔记甲"), releasedAt: NSPoint(x: on.x, y: on.y + 300)))
+        #expect(!tv.finishTableLinkPress(.wiki("别的"), releasedAt: on))
+        #expect(tv.finishTableLinkPress(.wiki("笔记甲"), releasedAt: on))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(clicked == ["笔记甲"])
+
+        let optionPress = try #require(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: on, modifierFlags: .option, timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        #expect(!tv.followTableLinkIfHit(event: optionPress))
     }
 
     /// Following a link commits a cell that is open in the editor.

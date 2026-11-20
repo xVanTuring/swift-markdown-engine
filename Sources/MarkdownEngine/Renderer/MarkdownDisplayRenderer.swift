@@ -196,6 +196,42 @@ public enum MarkdownDisplayRenderer {
         return image
     }
 
+    /// (fork: xVanTuring) A link drawn in a table image from
+    /// ``tableImage(source:style:availableWidth:appearance:)``: one entry per
+    /// line of its text.
+    public struct TableLink: Equatable, Sendable {
+        /// Where the text is drawn, in the image's top-down coordinates.
+        public let rect: CGRect
+        /// What it points at, as the text pieces carry it: the link's URL, or a
+        /// `[[…]]` as a ``wikiLinkScheme`` URL (read it with ``wikiLinkTarget(_:)``).
+        public let url: URL
+    }
+
+    /// The links drawn in a table image (none for any other image).
+    public static func tableLinks(in image: NSImage) -> [TableLink] {
+        guard let geometry = image.tableGeometry else { return [] }
+        return geometry.linkRuns().compactMap { run in
+            displayURL(for: run.link).map { TableLink(rect: run.rect, url: $0) }
+        }
+    }
+
+    /// The link whose text is at `point` (image top-down coordinates) in a
+    /// table image, or nil.
+    public static func tableLink(in image: NSImage, at point: CGPoint) -> URL? {
+        image.tableGeometry?.link(at: point).flatMap(displayURL(for:))
+    }
+
+    private static func displayURL(for link: TableCellLink) -> URL? {
+        switch link {
+        case .url(let url):
+            return url
+        case .wiki(let name):
+            // Same form as a wiki link in the text pieces.
+            let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+            return URL(string: "\(wikiLinkScheme):\(encoded)")
+        }
+    }
+
     // MARK: Block pieces
 
     /// `![alt](url)` / `![[target]]` alone in a paragraph (whitespace aside).

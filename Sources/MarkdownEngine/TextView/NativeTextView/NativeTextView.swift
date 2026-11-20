@@ -150,6 +150,9 @@ final class NativeTextView: NSTextView {
     // MARK: Wide-table overlay state
     /// Live NSScrollView per wide table; keyed by source-ID hash.
     var wideTableOverlays: [Int: WideTableOverlay] = [:]
+    /// (fork: xVanTuring) Hover texts over the links of the narrow table under
+    /// the pointer (`NativeTextView+TableLinks`).
+    let tableLinkToolTips = TableLinkToolTips()
     /// Persisted horizontal scroll offset per wide table; survives restyles.
     var tableHorizontalScrollOffsets: [Int: CGFloat] = [:]
 

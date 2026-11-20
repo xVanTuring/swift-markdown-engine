@@ -51,6 +51,14 @@ final class TableGeometry {
         return linkCells.first { $0.row == cell.row && $0.column == cell.column }?.link(at: point)
     }
 
+    /// (fork: xVanTuring) Every link's text in the table, line by line, in
+    /// image coordinates — except in the cell open in the in-place editor.
+    func linkRuns() -> [TableCellLinkRun] {
+        linkCells
+            .filter { cell in !(hiddenCell.map { $0.row == cell.row && $0.column == cell.column } ?? false) }
+            .flatMap { $0.linkRuns() }
+    }
+
     var columnCount: Int { max(0, columnLeft.count - 1) }
     var rowCount: Int { max(0, rowTop.count - 1) }
 
@@ -92,8 +100,9 @@ final class TableGeometry {
 
 // MARK: - Links in cells (fork: xVanTuring)
 
-/// What a link inside a table cell points at.
-enum TableCellLink: Equatable {
+/// What a link inside a table cell points at. Hashable: it is an attribute
+/// value, which Foundation hashes.
+enum TableCellLink: Hashable {
     /// `[text](url)`: opened as a click on a link in body text opens it.
     case url(URL)
     /// `[[name]]`: handed to `onLinkClick`, as a click on a wiki link in body text.
@@ -105,6 +114,18 @@ extension NSAttributedString.Key {
     /// Not `.link`: the cell is drawn into an image, and what is clickable is
     /// decided by `TableGeometry.link(at:)`, not by a text view.
     static let tableCellLink = NSAttributedString.Key("MarkdownTableCellLink")
+    /// String — the hover text the wiki-link resolver gave a cell's link
+    /// (`WikiLinkResolution.toolTip`). Not `.toolTip`, for the same reason.
+    static let tableCellToolTip = NSAttributedString.Key("MarkdownTableCellToolTip")
+}
+
+/// One line of a link's text in a table image.
+struct TableCellLinkRun {
+    /// Where the text is drawn, in the image's top-down coordinates.
+    let rect: CGRect
+    let link: TableCellLink
+    /// The resolver's hover text for it, if any.
+    let toolTip: String?
 }
 
 /// One cell's text as the table image draws it: the formatted string (with its
@@ -122,12 +143,12 @@ final class TableCellText {
         self.text = text
     }
 
-    /// Laid out the way `NSAttributedString.draw(with:options:)` lays out the
-    /// cell: no line fragment padding, no font leading (string drawing adds it
-    /// only with `.usesFontLeading`), wrapped to the cell's width.
     /// The storage owns its layout manager, not the other way round: kept
     /// here, or the layout manager is left with no text.
     private lazy var storage = NSTextStorage(attributedString: text)
+    /// Laid out the way `NSAttributedString.draw(with:options:)` lays out the
+    /// cell: no line fragment padding, no font leading (string drawing adds it
+    /// only with `.usesFontLeading`), wrapped to the cell's width.
     private lazy var layout: (NSLayoutManager, NSTextContainer) = {
         let storage = self.storage
         let layoutManager = NSLayoutManager()
@@ -155,22 +176,27 @@ final class TableCellText {
         return text.attribute(.tableCellLink, at: index, effectiveRange: nil) as? TableCellLink
     }
 
-    /// Rects of the link text, in image coordinates (used by the tests).
-    func linkRects() -> [CGRect] {
+    /// The cell's links, one entry per line of their text, in image coordinates.
+    func linkRuns() -> [TableCellLinkRun] {
         let (layoutManager, container) = layout
-        var rects: [CGRect] = []
+        var runs: [TableCellLinkRun] = []
         text.enumerateAttribute(.tableCellLink, in: NSRange(location: 0, length: text.length)) { value, range, _ in
-            guard value != nil else { return }
+            guard let link = value as? TableCellLink else { return }
+            let toolTip = text.attribute(.tableCellToolTip, at: range.location, effectiveRange: nil) as? String
             let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             layoutManager.enumerateEnclosingRects(
                 forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
                 in: container
             ) { rect, _ in
-                rects.append(rect.offsetBy(dx: self.frame.minX, dy: self.frame.minY))
+                runs.append(TableCellLinkRun(rect: rect.offsetBy(dx: self.frame.minX, dy: self.frame.minY),
+                                             link: link, toolTip: toolTip))
             }
         }
-        return rects
+        return runs
     }
+
+    /// Rects of the link text, in image coordinates.
+    func linkRects() -> [CGRect] { linkRuns().map(\.rect) }
 }
 
 private var tableGeometryKey: UInt8 = 0

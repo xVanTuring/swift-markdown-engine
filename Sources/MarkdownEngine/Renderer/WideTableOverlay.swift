@@ -269,6 +269,19 @@ final class WideTableOverlay: NSScrollView {
 final class WideTableImageView: NSImageView {
 
     weak var ownerOverlay: WideTableOverlay?
+    /// (fork: xVanTuring) Hover texts over the image's links; this view scrolls
+    /// with the image, so they are registered once per image.
+    let linkToolTips = TableLinkToolTips()
+
+    override var image: NSImage? {
+        didSet {
+            if let geometry = image?.tableGeometry {
+                linkToolTips.show(geometry, at: .zero, in: self)
+            } else {
+                linkToolTips.clear(in: self)
+            }
+        }
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
