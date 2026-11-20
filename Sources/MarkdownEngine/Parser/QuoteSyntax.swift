@@ -285,6 +285,17 @@ struct CalloutType: Equatable {
         return t
     }()
 
+    /// The colour as it is in light mode, `#rrggbb` (HTML export).
+    var lightHex: String {
+        var resolved = color
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            resolved = color.usingColorSpace(.sRGB) ?? color
+        }
+        let c = resolved.usingColorSpace(.sRGB) ?? resolved
+        func h(_ v: CGFloat) -> String { String(format: "%02x", Int((max(0, min(1, v)) * 255).rounded())) }
+        return "#" + h(c.redComponent) + h(c.greenComponent) + h(c.blueComponent)
+    }
+
     static func resolve(_ raw: String) -> CalloutType {
         let key = raw.lowercased()
         let entry = table[key] ?? table["note"]!
@@ -301,6 +312,8 @@ struct CalloutHeader: Equatable {
     let markerRange: NSRange
     /// The written title, trimmed; nil when none.
     let titleRange: NSRange?
+    /// `-` (foldable, starts collapsed), `+` (foldable, starts expanded), nil (not foldable).
+    var foldSign: Character? = nil
 
     /// What Obsidian shows when no title is written: the type as written, first letter capitalised.
     var defaultTitle: String {
@@ -324,7 +337,11 @@ struct CalloutHeader: Equatable {
         guard q > p + 2, q < to, ns.character(at: q) == 0x5D /* ] */ else { return nil }
         let typeText = ns.substring(with: NSRange(location: p + 2, length: q - p - 2))
         var r = q + 1
-        if r < to, ns.character(at: r) == 0x2B /* + */ || ns.character(at: r) == 0x2D /* - */ { r += 1 }
+        var fold: Character?
+        if r < to, ns.character(at: r) == 0x2B /* + */ || ns.character(at: r) == 0x2D /* - */ {
+            fold = ns.character(at: r) == 0x2B ? "+" : "-"
+            r += 1
+        }
         // Anything but a blank right after `]` / the fold sign: `[!note]x` is no header.
         guard r == to || QuoteSyntax.isWS(ns.character(at: r)) else { return nil }
         while r < to, QuoteSyntax.isWS(ns.character(at: r)) { r += 1 }
@@ -333,7 +350,8 @@ struct CalloutHeader: Equatable {
         return CalloutHeader(type: CalloutType.resolve(typeText),
                              typeText: typeText,
                              markerRange: NSRange(location: p, length: r - p),
-                             titleRange: titleEnd > r ? NSRange(location: r, length: titleEnd - r) : nil)
+                             titleRange: titleEnd > r ? NSRange(location: r, length: titleEnd - r) : nil,
+                             foldSign: fold)
     }
 }
 
@@ -498,10 +516,14 @@ enum CalloutHeaderImage {
         return c
     }()
 
+    /// A foldable callout's disclosure chevron, drawn before the icon.
+    enum Chevron: String { case collapsed, expanded }
+
     /// `title` = the default title to draw after the icon, or nil when the line has its own.
-    static func image(type: CalloutType, title: String?, font: NSFont, titleFont: NSFont) -> Result? {
+    static func image(type: CalloutType, title: String?, font: NSFont, titleFont: NSFont,
+                      chevron: Chevron? = nil) -> Result? {
         let descent = -font.descender
-        let key = "\(type.name)|\(title ?? "")|\(font.fontName)|\(font.pointSize)" as NSString
+        let key = "\(type.name)|\(title ?? "")|\(font.fontName)|\(font.pointSize)|\(chevron?.rawValue ?? "")" as NSString
         if let cached = cache.object(forKey: key) { return Result(image: cached, descent: descent) }
         let height = ceil(font.ascender - font.descender)
         let symbolConfig = NSImage.SymbolConfiguration(pointSize: font.pointSize * 0.92, weight: .semibold)
@@ -512,7 +534,13 @@ enum CalloutHeaderImage {
             CTLineCreateWithAttributedString(NSAttributedString(string: $0, attributes: [.font: titleFont]))
         }
         let titleWidth = titleLine.map { ceil(CTLineGetTypographicBounds($0, nil, nil, nil)) } ?? 0
-        let width = ceil(symbol.size.width) + gap + titleWidth
+        // The chevron's slot is the same width either way, so folding never shifts the title.
+        let chevronSlot: CGFloat = chevron == nil ? 0 : round(font.pointSize * 0.95)
+        let chevronSymbol = chevron.flatMap {
+            NSImage(systemSymbolName: $0 == .collapsed ? "chevron.right" : "chevron.down", accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: font.pointSize * 0.62, weight: .bold))
+        }
+        let width = chevronSlot + ceil(symbol.size.width) + gap + titleWidth
 
         let color = type.color
         let symbolSize = symbol.size
@@ -520,15 +548,21 @@ enum CalloutHeaderImage {
         let image = NSImage(size: CGSize(width: width, height: height), flipped: false) { _ in
             // Resolved here, under the appearance being drawn for (blue / purple differ in dark mode).
             let resolved = color.usingColorSpace(.sRGB) ?? color
+            if let chevronSymbol {
+                let cs = chevronSymbol.size
+                chevronSymbol.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [resolved]))?
+                    .draw(in: CGRect(x: (chevronSlot - cs.width) / 2, y: descent + (capHeight - cs.height) / 2,
+                                     width: cs.width, height: cs.height))
+            }
             let symbolY = descent + (capHeight - symbolSize.height) / 2
             symbol.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [resolved]))?
-                .draw(in: CGRect(x: 0, y: symbolY, width: symbolSize.width, height: symbolSize.height))
+                .draw(in: CGRect(x: chevronSlot, y: symbolY, width: symbolSize.width, height: symbolSize.height))
             if let title, let cg = NSGraphicsContext.current?.cgContext {
                 let line = CTLineCreateWithAttributedString(NSAttributedString(
                     string: title, attributes: [.font: titleFont, .foregroundColor: resolved]))
                 cg.saveGState()
                 cg.textMatrix = .identity
-                cg.textPosition = CGPoint(x: ceil(symbolSize.width) + gap, y: descent)
+                cg.textPosition = CGPoint(x: chevronSlot + ceil(symbolSize.width) + gap, y: descent)
                 CTLineDraw(line, cg)
                 cg.restoreGState()
             }
@@ -540,7 +574,56 @@ enum CalloutHeaderImage {
     }
 }
 
+/// (fork: xVanTuring) Which foldable callouts (`[!type]-` / `[!type]+`) one editor
+/// shows collapsed. View state only — folding never edits the text. A callout is
+/// known by its header line's text and how many identical header lines come
+/// before it, so the state survives edits elsewhere in the document.
+public final class CalloutFolds {
+    private var overrides: [String: Bool] = [:]   // key → collapsed
+
+    public init() {}
+
+    func isCollapsed(_ key: String, defaultCollapsed: Bool) -> Bool { overrides[key] ?? defaultCollapsed }
+
+    func toggle(_ key: String, defaultCollapsed: Bool) {
+        overrides[key] = !isCollapsed(key, defaultCollapsed: defaultCollapsed)
+    }
+
+    /// Forget every toggle (another document opened in the same editor).
+    public func reset() { overrides.removeAll() }
+
+    static func key(headerLine line: QuoteSyntax.Line, in ns: NSString) -> String {
+        let text = ns.substring(with: line.textRange)
+        var count = 0
+        var searchStart = 0
+        while searchStart < line.range.location {
+            let r = ns.range(of: text, options: .literal,
+                             range: NSRange(location: searchStart, length: line.range.location - searchStart))
+            guard r.location != NSNotFound else { break }
+            count += 1
+            searchStart = NSMaxRange(r)
+        }
+        return "\(count)|" + text
+    }
+}
+
+/// On a foldable callout header's icon: what a click on it folds.
+final class CalloutFoldTarget: NSObject {
+    let key: String
+    let defaultCollapsed: Bool
+    init(key: String, defaultCollapsed: Bool) {
+        self.key = key
+        self.defaultCollapsed = defaultCollapsed
+    }
+    override func isEqual(_ object: Any?) -> Bool {
+        (object as? CalloutFoldTarget).map { $0.key == key && $0.defaultCollapsed == defaultCollapsed } ?? false
+    }
+    override var hash: Int { key.hashValue }
+}
+
 extension NSAttributedString.Key {
+    /// `CalloutFoldTarget` — on the header icon of a foldable callout (the anchor character).
+    static let calloutFoldTarget = NSAttributedString.Key("CalloutFoldTarget")
     /// `QuoteLineDecoration` — on every character of a quote line.
     static let blockquoteDecoration = NSAttributedString.Key("BlockquoteDecoration")
     /// CGFloat — a centred block image is centred in the container minus this

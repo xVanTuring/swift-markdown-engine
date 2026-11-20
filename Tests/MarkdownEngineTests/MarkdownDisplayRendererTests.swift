@@ -54,6 +54,7 @@ struct MarkdownDisplayRendererTests {
             switch s {
             case .text: return "text"
             case .quote: return "quote"
+            case .callout: return "callout"
             case .code: return "code"
             case .math: return "math"
             case .table: return "table"

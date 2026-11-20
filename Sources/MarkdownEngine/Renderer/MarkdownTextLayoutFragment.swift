@@ -866,6 +866,11 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         // a strictly in-bounds index, so skip the sentinel.
         let lines = textLineFragments.filter { fragLocation + $0.characterRange.location < ts.length }
         let fragmentBottom = point.y + layoutFragmentFrame.height
+        // Edges on device pixels, rounded the same way: neighbouring lines then meet
+        // exactly — no hairline gap between them, and no overlap darkening the tint.
+        let scale = textLayoutManager?.textContainer?.textView?.window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor ?? 2
+        func snap(_ y: CGFloat) -> CGFloat { (y * scale).rounded() / scale }
         var out: [QuoteSegment] = []
         for (index, lineFragment) in lines.enumerated() {
             let docStart = fragLocation + lineFragment.characterRange.location
@@ -885,7 +890,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
                 }
                 let color = decoration.flatMap { i < $0.colors.count ? $0.colors[i] : nil }
                 out.append(QuoteSegment(x: leftEdge + CGFloat(i) * indentPerLevel + indentPerLevel * 0.25,
-                                        top: top, bottom: bottom, color: color))
+                                        top: snap(top), bottom: snap(bottom), color: color))
             }
         }
         return out

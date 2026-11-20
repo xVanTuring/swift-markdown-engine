@@ -147,6 +147,7 @@ extension NativeTextViewCoordinator {
                 // Same parse the tokens came from; without it the styler ran the
                 // block parser a SECOND time over the whole document per open.
                 precomputedBlocks: parsed.blocks,
+                calloutFolds: calloutFolds,
                 configuration: configuration
             )
             // scoped=nil is the point: the rebuild passes no scopedRanges, so
@@ -259,6 +260,7 @@ extension NativeTextViewCoordinator {
             precomputedBlocks: blocks,
             sourceText: sourceText,
             content: content,
+            calloutFolds: calloutFolds,
             configuration: configuration
         )
         // Width-specific callers already have the exact new wide-table anchor

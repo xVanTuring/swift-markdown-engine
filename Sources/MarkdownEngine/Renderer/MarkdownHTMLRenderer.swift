@@ -124,15 +124,53 @@ public enum MarkdownHTMLRenderer {
 
     /// Blockquote inlines are parsed over the block range *including* the `> `
     /// markers, so strip the markers per line and re-parse the content clean.
+    /// (fork: xVanTuring) `$$…$$` in the quote becomes `<pre>` like a top-level
+    /// one; a callout header becomes a bold title in the type colour, and an
+    /// outer one tags the quote `data-callout="type"`.
     private static func renderBlockquote(range: NSRange, ns: NSString, env: Env) -> String {
-        let raw = ns.substring(with: range)
-        let stripped = raw
-            .components(separatedBy: "\n")
-            .map(stripQuoteMarkers)
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
-        let inlines = InlineParser.parse(stripped, registry: env.registry)
-        return "<blockquote>\(renderInlines(inlines, ns: stripped as NSString, env: env))</blockquote>"
+        let layouts = CalloutScan.layout(of: range, in: ns)
+        let math = QuoteMath.tokens(in: ns, range: range)
+        var parts: [String] = []
+        var pending: [String] = []
+        func flush() {
+            let stripped = pending.filter { !$0.isEmpty }.joined(separator: "\n")
+            pending = []
+            guard !stripped.isEmpty else { return }
+            parts.append(renderInlines(InlineParser.parse(stripped, registry: env.registry), ns: stripped as NSString, env: env))
+        }
+        var calloutType: String?
+        var i = 0
+        while i < layouts.count {
+            let q = layouts[i]
+            if let header = q.header {
+                flush()
+                if i == 0, q.line.level == 1 { calloutType = header.type.name }
+                let title: String
+                if let r = header.titleRange {
+                    let t = ns.substring(with: r)
+                    title = renderInlines(InlineParser.parse(t, registry: env.registry), ns: t as NSString, env: env)
+                } else {
+                    title = escape(header.defaultTitle)
+                }
+                parts.append("<p><strong style=\"color:\(header.type.lightHex)\">\(title)</strong></p>")
+                i += 1
+                continue
+            }
+            if let t = math.first(where: { NSLocationInRange($0.range.location, q.line.range) }) {
+                flush()
+                var j = i
+                while j + 1 < layouts.count, layouts[j + 1].line.range.location < NSMaxRange(t.range) { j += 1 }
+                let body = QuoteMath.latexBody(ns.substring(with: t.contentRange)).trimmingCharacters(in: .whitespacesAndNewlines)
+                parts.append("<pre>\(escape("$$" + body + "$$"))</pre>")
+                i = j + 1
+                continue
+            }
+            pending.append(ns.substring(with: q.line.contentRange))
+            i += 1
+        }
+        flush()
+        let open = calloutType.map { "<blockquote data-callout=\"\($0)\">" } ?? "<blockquote>"
+        return open + parts.joined() + "</blockquote>"
     }
 
     /// Drop leading indent (≤3 spaces/tabs) then one-or-more `>` each with an

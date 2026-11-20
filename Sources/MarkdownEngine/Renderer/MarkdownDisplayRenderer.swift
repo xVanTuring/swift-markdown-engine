@@ -25,8 +25,15 @@ import AppKit
 public enum MarkdownDisplaySegment {
     /// Paragraphs, headings and lists in a row.
     case text(NSAttributedString, range: NSRange)
-    /// A block quote's text; the embedder draws the bar.
+    /// A block quote's text; the embedder draws the bar. `$$…$$` inside it is a
+    /// centred display formula (an attachment); a nested callout's header is a
+    /// title line (icon + bold title in its colour).
     case quote(NSAttributedString, range: NSRange)
+    /// (fork: xVanTuring) A quote whose first line is an Obsidian callout header
+    /// (`> [!type] Title`). The text starts with the title line (icon + bold
+    /// title in the callout's colour); the embedder draws the box — tinted and
+    /// barred in `callout.color`.
+    case callout(MarkdownDisplayCallout, NSAttributedString, range: NSRange)
     /// A fenced code block: the info-string language and the code between the fences.
     case code(language: String?, code: String, range: NSRange)
     /// `$$ … $$` display math (delimiters stripped).
@@ -41,11 +48,21 @@ public enum MarkdownDisplaySegment {
     /// The segment's source range in the Markdown text (UTF-16).
     public var range: NSRange {
         switch self {
-        case .text(_, let r), .quote(_, let r), .code(_, _, let r), .math(_, let r),
+        case .text(_, let r), .quote(_, let r), .callout(_, _, let r), .code(_, _, let r), .math(_, let r),
              .table(_, let r), .rule(let r), .image(_, _, let r):
             return r
         }
     }
+}
+
+/// (fork: xVanTuring) An Obsidian callout's look, for the embedder to draw its box.
+public struct MarkdownDisplayCallout: Equatable {
+    /// Canonical type name (`note`, `warning`, `example` …).
+    public let type: String
+    /// The type's colour (adapts to light / dark): the bar, and the box's tint at low opacity.
+    public let color: NSColor
+    /// Suggested tint opacity (`BlockquoteStyle.calloutTintAlpha`).
+    public let tintAlpha: CGFloat
 }
 
 /// What display segments are styled with.
@@ -119,7 +136,12 @@ public enum MarkdownDisplayRenderer {
                 addToRun(builder.list(items, ns), r)
             case .blockquote(let r, _):
                 flushRun()
-                out.append(.quote(builder.quote(range: r, ns), range: r))
+                let q = builder.quote(range: r, ns)
+                if let callout = q.callout {
+                    out.append(.callout(callout, q.text, range: r))
+                } else {
+                    out.append(.quote(q.text, range: r))
+                }
             case .codeBlock(let r):
                 flushRun()
                 let parts = codeParts(ns.substring(with: r))
@@ -286,29 +308,116 @@ public enum MarkdownDisplayRenderer {
             return out
         }
 
-        func quote(range: NSRange, _ ns: NSString) -> NSAttributedString {
-            let stripped = ns.substring(with: range)
-                .components(separatedBy: "\n")
-                .map(Self.stripQuoteMarkers)
-                .joined(separator: "\n")
-                .trimmingCharacters(in: .newlines)
-            let inner = stripped as NSString
+        /// A quote's text with its `>` markers gone (nesting flattened). (fork: xVanTuring)
+        /// `$$…$$` lines become a centred display formula; a callout header becomes a
+        /// title line — the outer one makes the whole quote a callout.
+        func quote(range: NSRange, _ ns: NSString) -> (callout: MarkdownDisplayCallout?, text: NSAttributedString) {
+            let quoteStyle = style.configuration.blockquote
+            let layouts = CalloutScan.layout(of: range, in: ns, callouts: quoteStyle.rendersCallouts)
+            let math = QuoteMath.tokens(in: ns, range: range)
+            var callout: MarkdownDisplayCallout?
+            if let first = layouts.first, let header = first.header, first.line.level == 1 {
+                callout = MarkdownDisplayCallout(type: header.type.name, color: header.type.color,
+                                                 tintAlpha: quoteStyle.calloutTintAlpha)
+            }
+
             let out = NSMutableAttributedString()
-            append(InlineParser.parse(stripped, registry: registry), inner, font: font, link: nil, into: out)
-            trimTrailingBreaks(out)
-            out.addAttribute(.paragraphStyle, value: bodyParagraph(after: 0), range: NSRange(location: 0, length: out.length))
-            return out
+            var pendingText: [String] = []
+            func newParagraph() {
+                guard out.length > 0 else { return }
+                // The break belongs to the paragraph before it: give it that paragraph's style.
+                var attrs: [NSAttributedString.Key: Any] = [.font: font]
+                attrs[.paragraphStyle] = out.attribute(.paragraphStyle, at: out.length - 1, effectiveRange: nil)
+                out.append(NSAttributedString(string: "\n", attributes: attrs))
+            }
+            func flushText() {
+                guard !pendingText.isEmpty else { return }
+                let stripped = pendingText.joined(separator: "\n").trimmingCharacters(in: .newlines)
+                pendingText = []
+                guard !stripped.isEmpty else { return }
+                let piece = NSMutableAttributedString()
+                append(InlineParser.parse(stripped, registry: registry), stripped as NSString, font: font, link: nil, into: piece)
+                trimTrailingBreaks(piece)
+                guard piece.length > 0 else { return }
+                piece.addAttribute(.paragraphStyle, value: bodyParagraph(after: 0), range: NSRange(location: 0, length: piece.length))
+                newParagraph()
+                out.append(piece)
+            }
+
+            var i = 0
+            while i < layouts.count {
+                let q = layouts[i]
+                let l = q.line
+                if let header = q.header {
+                    flushText()
+                    newParagraph()
+                    out.append(titleLine(header, ns))
+                    i += 1
+                    continue
+                }
+                if let t = math.first(where: { NSLocationInRange($0.range.location, l.range) }) {
+                    flushText()
+                    // Lines the formula spans (it may close on a later line).
+                    var j = i
+                    while j + 1 < layouts.count, layouts[j + 1].line.range.location < NSMaxRange(t.range) { j += 1 }
+                    let raw = ns.substring(with: t.contentRange)
+                    let latexBody = QuoteMath.latexBody(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+                    newParagraph()
+                    out.append(displayFormula(latexBody, source: ns.substring(with: t.range)))
+                    i = j + 1
+                    continue
+                }
+                pendingText.append(ns.substring(with: l.contentRange))
+                i += 1
+            }
+            flushText()
+            return (callout, out)
         }
 
-        private static func stripQuoteMarkers(_ line: String) -> String {
-            var s = Substring(line)
-            var indent = 0
-            while let c = s.first, c == " " || c == "\t", indent < 3 { s = s.dropFirst(); indent += 1 }
-            while s.first == ">" {
-                s = s.dropFirst()
-                if s.first == " " || s.first == "\t" { s = s.dropFirst() }
+        /// A callout header as a line: its icon, then the title (the type's name when
+        /// none is written) in bold, in the type's colour.
+        private func titleLine(_ header: CalloutHeader, _ ns: NSString) -> NSAttributedString {
+            let bold = NSFont(descriptor: descriptor.withSymbolicTraits(.bold), size: font.pointSize)
+                ?? .boldSystemFont(ofSize: font.pointSize)
+            let line = NSMutableAttributedString()
+            if let icon = CalloutHeaderImage.image(type: header.type, title: nil, font: font, titleFont: bold) {
+                let attachment = NSTextAttachment()
+                attachment.image = icon.image
+                attachment.bounds = CGRect(x: 0, y: -icon.descent, width: icon.image.size.width, height: icon.image.size.height)
+                let a = NSMutableAttributedString(attachment: attachment)
+                a.addAttributes([.font: font, MarkdownDisplayRenderer.sourceAttribute: ns.substring(with: header.markerRange)],
+                                range: NSRange(location: 0, length: a.length))
+                line.append(a)
             }
-            return String(s)
+            if let title = header.titleRange {
+                let titleText = ns.substring(with: title)
+                append(InlineParser.parse(titleText, registry: registry), titleText as NSString, font: bold, link: nil, into: line)
+            } else {
+                line.append(NSAttributedString(string: header.defaultTitle, attributes: [.font: bold]))
+            }
+            line.addAttribute(.foregroundColor, value: header.type.color, range: NSRange(location: 0, length: line.length))
+            line.addAttribute(.paragraphStyle, value: bodyParagraph(after: (font.pointSize * 0.35).rounded()),
+                              range: NSRange(location: 0, length: line.length))
+            return line
+        }
+
+        /// `$$…$$` from a quote: a centred formula in display style; its source when it does not render.
+        private func displayFormula(_ latexBody: String, source: String) -> NSAttributedString {
+            let p = NSMutableParagraphStyle()
+            p.alignment = .center
+            p.paragraphSpacing = paragraphGap
+            p.paragraphSpacingBefore = (font.pointSize * 0.3).rounded()
+            guard !latexBody.isEmpty,
+                  let entry = latex.render(latex: latexBody, mode: .display, fontSize: font.pointSize, theme: theme) else {
+                return NSAttributedString(string: source, attributes: [.font: font, .foregroundColor: theme.bodyText, .paragraphStyle: p])
+            }
+            let attachment = NSTextAttachment()
+            attachment.image = entry.image
+            attachment.bounds = CGRect(x: 0, y: -entry.baselineOffset, width: entry.size.width, height: entry.size.height)
+            let piece = NSMutableAttributedString(attachment: attachment)
+            piece.addAttributes([.font: font, .paragraphStyle: p, MarkdownDisplayRenderer.sourceAttribute: source],
+                                range: NSRange(location: 0, length: piece.length))
+            return piece
         }
 
         /// Items one per paragraph: marker, tab, text, hanging indent. Depth is

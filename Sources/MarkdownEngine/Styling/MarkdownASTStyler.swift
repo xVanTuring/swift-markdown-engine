@@ -865,8 +865,8 @@ enum MarkdownASTStyler {
             .font: markerFont,
             .kern: icon.image.size.width - HeadingHelpers.textWidth(firstChar, font: markerFont),
         ]))
-        if header.markerRange.length > 1 {
-            let restRange = NSRange(location: header.markerRange.location + 1, length: header.markerRange.length - 1)
+        if header.markerRange.length > 2 {
+            let restRange = NSRange(location: header.markerRange.location + 1, length: header.markerRange.length - 2)
             let restText = ctx.ns.substring(with: restRange)
             attrs.append((restRange, [
                 .foregroundColor: NSColor.clear,
@@ -874,6 +874,15 @@ enum MarkdownASTStyler {
                 .kern: -MarkdownStyler.hiddenRunKern(restText, font: markerFont),
             ]))
         }
+        // The marker's last character keeps the body font (invisible, no advance): with no title
+        // written, everything on the line is hidden marker, and a line of shrunken characters has
+        // no depth below the baseline — the icon and the drawn type name were cut off there.
+        let lastRange = NSRange(location: NSMaxRange(header.markerRange) - 1, length: 1)
+        attrs.append((lastRange, [
+            .foregroundColor: NSColor.clear,
+            .font: ctx.baseFont,
+            .kern: -HeadingHelpers.textWidth(ctx.ns.substring(with: lastRange), font: ctx.baseFont),
+        ]))
     }
 
     /// Callout header markers (`[!type]` …) in the styled blocks — kept out of the incomplete-link pass.

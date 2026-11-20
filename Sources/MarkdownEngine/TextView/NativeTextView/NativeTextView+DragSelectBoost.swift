@@ -19,6 +19,7 @@ extension NativeTextView {
             guard let ts = textStorage, idx >= 0, idx < ts.length else { return false }
             return ts.attribute(.link, at: idx, effectiveRange: nil) != nil
         }()
+        if toggleCalloutFoldIfHit(event: event) { return }   // fork: xVanTuring
         if let toggled = toggleTaskCheckboxIfHit(event: event), toggled { return }
         if beginTableCellEditingIfHit(event: event) { return }
         clearTableSelection()

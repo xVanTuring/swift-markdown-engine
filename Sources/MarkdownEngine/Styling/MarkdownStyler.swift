@@ -207,6 +207,7 @@ enum MarkdownStyler {
         classified: ClassifiedStyleTokens? = nil,
         precomputedBlocks: [Block]? = nil,
         scopedRanges: [NSRange]? = nil,
+        calloutFolds: CalloutFolds? = nil,
         configuration: MarkdownEditorConfiguration = .default
     ) -> [StyledRange] {
         let ctx = makeStylingContext(
@@ -241,6 +242,8 @@ enum MarkdownStyler {
         result += styleFencedBlocks(ctx)
         let imgMs = Double(DispatchTime.now().uptimeNanoseconds - imgT0) / 1_000_000
         result += styleTables(ctx)
+        // Last: a collapsed callout hides its body over everything above (fork: xVanTuring).
+        result += styleCalloutFolds(ctx, folds: calloutFolds, caret: caretLocation, selection: selection)
         PerfTrace.note { "  styleAttributes: ast=\(String(format: "%.2f", astMs))ms latex+img4=\(String(format: "%.2f", imgMs))ms styledRanges=\(result.count)" }
         return result
     }

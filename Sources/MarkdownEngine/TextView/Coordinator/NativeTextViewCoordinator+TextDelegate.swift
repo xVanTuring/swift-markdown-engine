@@ -599,6 +599,15 @@ extension NativeTextViewCoordinator {
             // to repaint.
             return false
         }
+        // Foldable callouts around the old and new caret (`[!type]-` / `[!type]+`).
+        let foldBlocks: [NSRange] = {
+            guard configuration.blockquote.rendersCallouts else { return [] }
+            var out: [NSRange] = []
+            for loc in [caretLoc, previousCaretLocation].compactMap({ $0 }) where loc <= nsText.length {
+                if let block = foldableCalloutBlock(around: loc, in: nsText), !out.contains(block) { out.append(block) }
+            }
+            return out
+        }()
         let selectionSpanChanged = previousSelectedRange != selRange
             && ((previousSelectedRange?.length ?? 0) > 0 || selRange.length > 0)
             && (paragraphsTouchRevealSyntax(previousSelectedRange) || paragraphsTouchRevealSyntax(selRange))
@@ -609,7 +618,7 @@ extension NativeTextViewCoordinator {
         } else if isDragSelecting {
             needsRestyleAfterDrag = true
         } else if tokensChanged || taskSyntaxChanged || hrLineChanged || bulletSyntaxChanged
-                    || selectionSpanChanged || needsRestyleAfterDrag {
+                    || selectionSpanChanged || needsRestyleAfterDrag || !foldBlocks.isEmpty {
             needsRestyleAfterDrag = false
             // Candidates are built ONLY when a restyle actually runs — this
             // used to happen unconditionally on every selection change,
@@ -651,6 +660,9 @@ extension NativeTextViewCoordinator {
                 currentActiveTokenIndices: activeTokenIndices,
                 previousActiveTokenIndices: previousActiveTokenIndices
             ))
+            // A foldable callout the caret is in (or just left): its body shows while the caret
+            // is on a hidden line, so the whole quote restyles (fork: xVanTuring).
+            paragraphCandidates.append(contentsOf: foldBlocks)
             PerfTrace.measure("selRestyle") {
                 restyleTextView(tv, paragraphCandidates: paragraphCandidates, tokens: tokens,
                                 classified: parsed.classified, blocks: parsed.blocks)
@@ -1222,3 +1234,28 @@ extension NativeTextViewCoordinator {
     }
 
 }
+
+// MARK: - Foldable callouts (fork: xVanTuring)
+
+extension NativeTextViewCoordinator {
+
+    /// The quote around `location` when it holds a foldable callout (`[!type]-` / `[!type]+`).
+    func foldableCalloutBlock(around location: Int, in ns: NSString) -> NSRange? {
+        guard ns.length > 0 else { return nil }
+        let lineStart = ns.lineRange(for: NSRange(location: min(location, ns.length - 1), length: 0)).location
+        guard QuoteSyntax.line(in: ns, at: lineStart).level > 0,
+              let block = QuoteSyntax.blockRange(around: lineStart, in: ns),
+              ns.range(of: "[!", options: [], range: block).location != NSNotFound,
+              CalloutScan.layout(of: block, in: ns).contains(where: { $0.header?.foldSign != nil }) else { return nil }
+        return block
+    }
+
+    /// Fold / unfold the callout whose header icon was clicked, and restyle its quote.
+    func toggleCalloutFold(_ target: CalloutFoldTarget, at location: Int, in textView: NSTextView) {
+        calloutFolds.toggle(target.key, defaultCollapsed: target.defaultCollapsed)
+        let ns = textView.string as NSString
+        let block = QuoteSyntax.blockRange(around: location, in: ns) ?? ns.paragraphRange(for: NSRange(location: location, length: 0))
+        restyleParagraphs([block], in: textView)
+    }
+}
+

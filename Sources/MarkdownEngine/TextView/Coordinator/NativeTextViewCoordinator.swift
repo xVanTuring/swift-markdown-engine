@@ -146,6 +146,8 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
     /// teardown). Created on first reconcile with a non-nil header.
     var headerController: ScrollingHeaderController?
     var layoutBridge: LayoutBridge?
+    /// Which foldable callouts this editor shows collapsed (fork: xVanTuring; view state only).
+    let calloutFolds = CalloutFolds()
     var layoutDelegate: MarkdownLayoutManagerDelegate?
     var onLinkClick: ((String) -> Void)?
     var onCaretRectChange: ((CGRect) -> Void)?

@@ -66,6 +66,7 @@ struct TextStylingService {
         precomputedBlocks: [Block]? = nil,
         sourceText: String? = nil,
         content: RestyleContent = .all,
+        calloutFolds: CalloutFolds? = nil,
         configuration: MarkdownEditorConfiguration = .default
     ) -> [NSRange] {
         let paragraphs = normalize(paragraphCandidates)
@@ -99,6 +100,7 @@ struct TextStylingService {
                 classified: classified,
                 precomputedBlocks: precomputedBlocks,
                 scopedRanges: paragraphs,
+                calloutFolds: calloutFolds,
                 configuration: configuration
             )
         case .tables:

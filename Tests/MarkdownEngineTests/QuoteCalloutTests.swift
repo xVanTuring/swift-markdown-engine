@@ -186,4 +186,107 @@ struct QuoteCalloutTests {
                                                    caretLocation: -1, activeTokenIndices: [], configuration: c)
         #expect(!attrs.contains { ($0.attributes[.blockquoteDecoration] as? QuoteLineDecoration)?.hasCallout == true })
     }
+
+    // MARK: - Read-only display
+
+    private static func displayStyle(_ latex: any LatexRenderer = Recorder()) -> MarkdownDisplayStyle {
+        MarkdownDisplayStyle(configuration: configuration(latex), font: .systemFont(ofSize: 14))
+    }
+
+    @Test("Display: a callout quote becomes a callout segment with its title line")
+    func displayCallout() {
+        _ = NSApplication.shared
+        let segs = MarkdownDisplayRenderer.segments(for: "> [!warning] 小心\n> 正文 $x$\n", style: Self.displayStyle())
+        #expect(segs.count == 1)
+        guard case .callout(let c, let text, _) = segs.first else { Issue.record("not a callout"); return }
+        #expect(c.type == "warning")
+        let lines = text.string.components(separatedBy: "\n")
+        #expect(lines.count == 2)
+        #expect(lines[0].hasSuffix("小心"))
+        #expect(lines[0].hasPrefix("\u{FFFC}"))          // icon attachment
+        #expect(lines[1].hasPrefix("正文"))
+        // No written title: the type's name.
+        guard case .callout(_, let t2, _) = MarkdownDisplayRenderer.segments(for: "> [!example]\n> a\n", style: Self.displayStyle()).first
+        else { Issue.record("not a callout"); return }
+        #expect(t2.string.components(separatedBy: "\n").first?.hasSuffix("Example") == true)
+    }
+
+    @Test("Display: $$ in a quote is a centred display formula; plain quotes stay quotes")
+    func displayQuoteMath() {
+        _ = NSApplication.shared
+        let recorder = Recorder()
+        let segs = MarkdownDisplayRenderer.segments(for: "> 得\n> $$\n> a+b\n> $$\n> 故\n", style: Self.displayStyle(recorder))
+        #expect(segs.count == 1)
+        guard case .quote(let text, _) = segs.first else { Issue.record("not a quote"); return }
+        #expect(recorder.box.calls.contains { $0.0 == "a+b" && $0.1 == .display })
+        #expect(text.string == "得\n\u{FFFC}\n故")
+        let p = text.attribute(.paragraphStyle, at: 2, effectiveRange: nil) as? NSParagraphStyle
+        #expect(p?.alignment == .center)
+        #expect(text.attribute(MarkdownDisplayRenderer.sourceAttribute, at: 2, effectiveRange: nil) as? String == "$$\n> a+b\n> $$")
+    }
+
+    // MARK: - HTML
+
+    @Test("HTML: quote math is <pre>, callouts get a coloured title and data-callout")
+    func html() {
+        #expect(MarkdownHTMLRenderer.html(from: "> hello") == "<blockquote>hello</blockquote>")
+        #expect(MarkdownHTMLRenderer.html(from: "> 得\n> $$\n> a<b\n> $$\n> 故")
+            == "<blockquote>得<pre>$$a&lt;b$$</pre>故</blockquote>")
+        #expect(MarkdownHTMLRenderer.html(from: "> [!example]\n> 正文")
+            == "<blockquote data-callout=\"example\"><p><strong style=\"color:#7852ee\">Example</strong></p>正文</blockquote>")
+        #expect(MarkdownHTMLRenderer.html(from: "> [!tip] **重点**\n> x").contains("<strong style=\"color:#00bfbc\"><strong>重点</strong></strong>"))
+    }
+
+    // MARK: - Folding
+
+    private static func styleFold(_ text: String, caret: Int = -1, folds: CalloutFolds? = nil) -> [StyledRange] {
+        _ = NSApplication.shared
+        let tokens = MarkdownTokenizer.parseTokensViaAST(in: text)
+        let active = caret < 0 ? Set<Int>() : MarkdownDetection.computeActiveTokenIndices(
+            selectionRange: NSRange(location: caret, length: 0), tokens: tokens, in: text as NSString)
+        return MarkdownStyler.styleAttributes(text: text, fontName: "Helvetica", fontSize: 14,
+                                              caretLocation: caret, activeTokenIndices: active,
+                                              calloutFolds: folds, configuration: configuration(Recorder()))
+    }
+
+    private static func bodyHidden(_ attrs: [StyledRange], _ text: String, _ needle: String) -> Bool {
+        let r = (text as NSString).range(of: needle)
+        return attrs.contains { NSLocationInRange(r.location, $0.range) && $0.attributes[.latexImage] is NSNull }
+    }
+
+    @Test("Folding: `-` starts collapsed, `+` expanded, plain is not foldable")
+    func foldDefaults() {
+        let collapsed = "> [!tip]- 标题\n> 正文 $x$\n"
+        let a = Self.styleFold(collapsed)
+        #expect(Self.bodyHidden(a, collapsed, "正文"))
+        #expect(a.contains { $0.attributes[.calloutFoldTarget] is CalloutFoldTarget })
+
+        let expanded = "> [!tip]+ 标题\n> 正文\n"
+        let b = Self.styleFold(expanded)
+        #expect(!Self.bodyHidden(b, expanded, "正文"))
+        #expect(b.contains { $0.attributes[.calloutFoldTarget] is CalloutFoldTarget })
+
+        let plain = "> [!tip] 标题\n> 正文\n"
+        #expect(!Self.styleFold(plain).contains { $0.attributes[.calloutFoldTarget] != nil })
+    }
+
+    @Test("Folding: toggling, and the caret on a hidden line shows the body")
+    func foldToggleAndReveal() {
+        let text = "> [!note]- T\n> 正文\n> 第二行\n\n后面\n"
+        let folds = CalloutFolds()
+        let header = QuoteSyntax.line(in: text as NSString, at: 0)
+        let key = CalloutFolds.key(headerLine: header, in: text as NSString)
+        folds.toggle(key, defaultCollapsed: true)
+        #expect(!Self.bodyHidden(Self.styleFold(text, folds: folds), text, "正文"))
+        folds.toggle(key, defaultCollapsed: true)
+        #expect(Self.bodyHidden(Self.styleFold(text, folds: folds), text, "正文"))
+        let onHidden = (text as NSString).range(of: "第二行").location + 1
+        #expect(!Self.bodyHidden(Self.styleFold(text, caret: onHidden, folds: folds), text, "正文"))
+        // Identical headers are told apart by order.
+        let twice = "> [!note]- T\n> a\n\n> [!note]- T\n> b\n" as NSString
+        let second = QuoteSyntax.line(in: twice, at: twice.range(of: "> [!note]- T\n> b").location)
+        #expect(CalloutFolds.key(headerLine: QuoteSyntax.line(in: twice, at: 0), in: twice)
+            != CalloutFolds.key(headerLine: second, in: twice))
+    }
 }
+
