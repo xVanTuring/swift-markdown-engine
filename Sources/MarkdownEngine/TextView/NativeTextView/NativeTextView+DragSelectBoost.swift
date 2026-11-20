@@ -21,6 +21,7 @@ extension NativeTextView {
         }()
         if toggleCalloutFoldIfHit(event: event) { return }   // fork: xVanTuring
         if let toggled = toggleTaskCheckboxIfHit(event: event), toggled { return }
+        if followTableLinkIfHit(event: event) { return }   // fork: xVanTuring
         if beginTableCellEditingIfHit(event: event) { return }
         clearTableSelection()
         hideTableGrips()

@@ -303,6 +303,22 @@ final class WideTableImageView: NSImageView {
             super.mouseDown(with: event)
             return
         }
+        // (fork: xVanTuring) A press on a link in a cell follows it, in an
+        // editable or a read-only view alike (`NativeTextView+TableLinks`).
+        if NativeTextView.isPlainTableLinkClick(event),
+           let geometry = image?.tableGeometry,
+           let token = textView.tableToken(containing: location) {
+            let local = convert(event.locationInWindow, from: nil)
+            let imagePoint = CGPoint(x: local.x, y: bounds.height - local.y)
+            if let link = geometry.link(at: imagePoint), let cell = geometry.cell(at: imagePoint) {
+                textView.followTableLinkPress(link, tableStart: token.range.location, anchor: cell) { [weak self] drag in
+                    guard let self else { return nil }
+                    let p = self.convert(drag.locationInWindow, from: nil)
+                    return geometry.nearestCell(to: CGPoint(x: p.x, y: self.bounds.height - p.y))
+                }
+                return
+            }
+        }
         if textView.canEditTablesInPlace,
            let image = image, let geometry = image.tableGeometry,
            let token = textView.tableToken(containing: location) {

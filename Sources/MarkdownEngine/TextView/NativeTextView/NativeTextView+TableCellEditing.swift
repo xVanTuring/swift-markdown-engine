@@ -349,17 +349,23 @@ extension NativeTextView {
             return (host, host.convert(inOverlay, from: overlay))
         }
 
+        guard let origin = narrowTableImageOrigin(image: image, anchor: anchor) else { return nil }
+        return (self, NSRect(
+            x: origin.x + cell.minX,
+            y: origin.y + cell.minY,
+            width: cell.width,
+            height: cell.height
+        ))
+    }
+
+    /// Top-left corner of a narrow (non-scrolling) table's image in this view.
+    func narrowTableImageOrigin(image: NSImage, anchor: NSRange) -> NSPoint? {
         guard let bridge = layoutBridge, let container = bridge.firstTextContainer else { return nil }
         let anchorRect = bridge.boundingRect(forCharacterRange: anchor, in: container)
         guard !anchorRect.isEmpty else { return nil }
         // The image is centred in its line, exactly as the layout fragment draws it.
         let imageTop = anchorRect.minY + max(0, (anchorRect.height - image.size.height) / 2)
-        return (self, NSRect(
-            x: textContainerOrigin.x + anchorRect.minX + cell.minX,
-            y: textContainerOrigin.y + imageTop + cell.minY,
-            width: cell.width,
-            height: cell.height
-        ))
+        return NSPoint(x: textContainerOrigin.x + anchorRect.minX, y: textContainerOrigin.y + imageTop)
     }
 
     // MARK: Entry points

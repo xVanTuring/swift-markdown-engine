@@ -34,6 +34,11 @@ extension NativeTextView {
             // text, but the text view's tracking areas are not occlusion-aware
             // and super keeps setting the I-beam through it.
             NSCursor.arrow.set()
+        } else if isOverTableLink(event) {
+            // A link inside a table cell is drawn into the table's image, so
+            // there is no `.link` text under it for AppKit to show the hand
+            // over (fork: xVanTuring).
+            NSCursor.pointingHand.set()
         } else {
             super.mouseMoved(with: event)
             applyReadOnlyCursor(for: event)
@@ -50,6 +55,8 @@ extension NativeTextView {
             NSCursor.arrow.set()
         } else if isEditable, isOverWideTableOverlay(event) {
             NSCursor.arrow.set()
+        } else if isOverTableLink(event) {
+            NSCursor.pointingHand.set()
         } else {
             super.mouseEntered(with: event)
             applyReadOnlyCursor(for: event)

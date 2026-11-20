@@ -65,6 +65,7 @@ extension MarkdownStyler {
             + "\(ObjectIdentifier(theme.bodyText))|\(ObjectIdentifier(theme.mutedText))|"
             + "\(ObjectIdentifier(theme.highlightColor))|\(ObjectIdentifier(ctx.codeBackgroundColor))|"
             + "\(ObjectIdentifier(theme.latexLightModeText))|\(ObjectIdentifier(theme.latexDarkModeText))|"
+            + "\(ObjectIdentifier(theme.link))|\(ObjectIdentifier(theme.disabledText))|"
             + "\(ObjectIdentifier(type(of: ctx.services.latex)))"
 
         themeKeyLock.lock()
@@ -87,6 +88,8 @@ extension MarkdownStyler {
             colorKey(ctx.codeBackgroundColor, under: appearance),
             colorKey(theme.latexLightModeText, under: appearance),
             colorKey(theme.latexDarkModeText, under: appearance),
+            colorKey(theme.link, under: appearance),
+            colorKey(theme.disabledText, under: appearance),
             "\(ObjectIdentifier(type(of: ctx.services.latex)))",
         ].joined(separator: "|")
 
@@ -153,8 +156,15 @@ extension MarkdownStyler {
         let extensionKey = ctx.configuration.extensionRegistry.fingerprint
         let style = ctx.configuration.tableAppearance
         let hiddenKey = hiddenCell.map { "|h\($0.row),\($0.column)" } ?? ""
+        // (fork: xVanTuring) A `[[…]]` in a cell is drawn as its resolver says
+        // (shown text, broken or not): the resolver's state is part of the key
+        // of such a table — only of such a table, so that a change to the
+        // resolver's targets doesn't re-render every other table.
+        let wikiKey = source.contains("[[")
+            ? "|k\(type(of: ctx.services.wikiLinks)):\(ctx.services.wikiLinks.fingerprint())"
+            : ""
         let key = (themeKeyPrefix(ctx: ctx, appearance: appearance)
-            + "|x\(extensionKey)|s\(style)|w\(widthKey)\(hiddenKey)|" + source) as NSString
+            + "|x\(extensionKey)|s\(style)|w\(widthKey)\(hiddenKey)\(wikiKey)|" + source) as NSString
         if let cached = tableImageCache.object(forKey: key) {
             return (cached, false)
         }
@@ -168,7 +178,8 @@ extension MarkdownStyler {
             availableWidth: availableWidth,
             extensions: ctx.configuration.extensions,
             style: style,
-            hiddenCell: hiddenCell
+            hiddenCell: hiddenCell,
+            wikiLinks: ctx.services.wikiLinks
         )
         tableImageCache.setObject(image, forKey: key)
         return (image, true)
@@ -410,7 +421,8 @@ extension MarkdownStyler {
         codeBackgroundColor: NSColor,
         latex: any LatexRenderer,
         extensions: [any MarkdownExtension] = [],
-        style: TableAppearance = .grid
+        style: TableAppearance = .grid,
+        wikiLinks: (any WikiLinkResolver)? = nil
     ) -> NSAttributedString {
         let descriptor = baseFont.fontDescriptor
         // `.rounded`: the header is set a little smaller and semibold (not bold).
@@ -437,7 +449,7 @@ extension MarkdownStyler {
             in: raw as NSString, into: out,
             font: startFont, baseDescriptor: descriptor, pointSize: pointSize,
             codeFont: codeFont, theme: theme, codeBackgroundColor: codeBackgroundColor, latex: latex,
-            extensionsByID: extensionsByID
+            extensionsByID: extensionsByID, wikiLinks: wikiLinks
         )
         return out
     }
@@ -471,7 +483,15 @@ extension MarkdownStyler {
         return NSFont(descriptor: baseDescriptor.withSymbolicTraits(traits), size: pointSize) ?? current
     }
 
-    /// Walk the inline AST into marker-stripped runs; LaTeX as attachments, links/embeds emitted raw.
+    /// Walk the inline AST into marker-stripped runs; LaTeX as attachments,
+    /// links as link text carrying `.tableCellLink`, images / embeds emitted raw.
+    ///
+    /// (fork: xVanTuring) Links read as they do in body text: `[text](url)` shows
+    /// its text, `[[name]]` its name — or the resolver's shorter `displayText`
+    /// (`[[Book#page=12]]` → `p.12`) — in the link colour, underlined; a wiki
+    /// link the resolver does not know is greyed like a broken one in body text.
+    /// With no resolver (`wikiLinks == nil`, the read-only display renderer)
+    /// every wiki link shows its name as a link.
     private static func appendInlineCell(
         _ nodes: [InlineNode],
         in ns: NSString,
@@ -483,13 +503,14 @@ extension MarkdownStyler {
         theme: MarkdownEditorTheme,
         codeBackgroundColor: NSColor,
         latex: any LatexRenderer,
-        extensionsByID: [String: any MarkdownExtension] = [:]
+        extensionsByID: [String: any MarkdownExtension] = [:],
+        wikiLinks: (any WikiLinkResolver)? = nil
     ) {
         func recurse(_ children: [InlineNode], _ f: NSFont) {
             appendInlineCell(children, in: ns, into: out, font: f, baseDescriptor: baseDescriptor,
                              pointSize: pointSize, codeFont: codeFont, theme: theme,
                              codeBackgroundColor: codeBackgroundColor, latex: latex,
-                             extensionsByID: extensionsByID)
+                             extensionsByID: extensionsByID, wikiLinks: wikiLinks)
         }
         func appendPlain(_ range: NSRange, _ f: NSFont) {
             out.append(NSAttributedString(string: ns.substring(with: range),
@@ -543,9 +564,47 @@ extension MarkdownStyler {
                 } else {
                     appendPlain(range, font)   // renderer unavailable → keep raw `$…$`
                 }
-            case .link(let range, _, _, _, _),
-                 .image(let range, _, _, _),
-                 .wikiLink(let range, _, _, _),
+            case .link(let range, _, let url, _, let children):
+                // Same target rule as body text (`MarkdownASTStyler.styleLink`):
+                // no scheme means a web address, and a target that is not a URL
+                // leaves the text unstyled.
+                var target = ns.substring(with: url).trimmingCharacters(in: .whitespaces)
+                if !target.contains("://") { target = "https://\(target)" }
+                guard let linkURL = URL(string: target) else {
+                    appendPlain(range, font)
+                    break
+                }
+                let start = out.length
+                recurse(children, font)
+                out.addAttributes([
+                    .foregroundColor: theme.link,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .tableCellLink: TableCellLink.url(linkURL),
+                ], range: NSRange(location: start, length: out.length - start))
+            case .wikiLink(let range, let name, let id, _):
+                let nameText = ns.substring(with: name)
+                guard !nameText.isEmpty else {
+                    appendPlain(range, font)
+                    break
+                }
+                // Resolved and clicked by the stored id when there is one, as in
+                // body text (`linkID ?? nodeName`). The range handed to the
+                // resolver is the name's place in the CELL, not the document.
+                let key = id.map { ns.substring(with: $0) } ?? nameText
+                let resolution = wikiLinks?.resolve(displayName: key, range: name)
+                let exists = wikiLinks == nil || (resolution?.exists ?? false)
+                var shown = nameText
+                if exists, let display = resolution?.displayText, !display.isEmpty { shown = display }
+                var attributes: [NSAttributedString.Key: Any] = [.font: font]
+                if exists {
+                    attributes[.foregroundColor] = theme.link
+                    attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                    attributes[.tableCellLink] = TableCellLink.wiki(key)
+                } else {
+                    attributes[.foregroundColor] = theme.disabledText
+                }
+                out.append(NSAttributedString(string: shown, attributes: attributes))
+            case .image(let range, _, _, _),
                  .imageEmbed(let range, _, _):
                 appendPlain(range, font)
             }
@@ -564,7 +623,8 @@ extension MarkdownStyler {
         availableWidth: CGFloat,
         extensions: [any MarkdownExtension] = [],
         style: TableAppearance = .grid,
-        hiddenCell: (row: Int, column: Int)? = nil
+        hiddenCell: (row: Int, column: Int)? = nil,
+        wikiLinks: (any WikiLinkResolver)? = nil
     ) -> NSImage {
         let columnCount = table.alignments.count
         let metrics = style.metrics
@@ -591,7 +651,7 @@ extension MarkdownStyler {
             formattedCellString(
                 $0, baseFont: baseFont, header: true, theme: theme,
                 codeBackgroundColor: codeBackgroundColor, latex: latex,
-                extensions: extensions, style: style
+                extensions: extensions, style: style, wikiLinks: wikiLinks
             )
         }
         let bodyCells = table.rows.map { row in
@@ -599,7 +659,7 @@ extension MarkdownStyler {
                 formattedCellString(
                     $0, baseFont: baseFont, header: false, theme: theme,
                     codeBackgroundColor: codeBackgroundColor, latex: latex,
-                    extensions: extensions
+                    extensions: extensions, wikiLinks: wikiLinks
                 )
             }
         }
@@ -758,13 +818,62 @@ extension MarkdownStyler {
         let strongRule = mutedColor(alpha: 0.32)
         let lightRule = mutedColor(alpha: 0.2)
 
+        /// A cell's string with its column's alignment, as it is drawn.
+        func alignedCell(_ s: NSAttributedString, col: Int) -> NSAttributedString {
+            // Align via NSParagraphStyle; word-wrap fills the row height
+            // measured above (long words fall back to character breaks).
+            let paragraph = NSMutableParagraphStyle()
+            switch alignments[col] {
+            case .left:   paragraph.alignment = .left
+            case .center: paragraph.alignment = .center
+            case .right:  paragraph.alignment = .right
+            }
+            paragraph.lineBreakMode = .byWordWrapping
+            let aligned = NSMutableAttributedString(attributedString: s)
+            aligned.addAttribute(
+                .paragraphStyle,
+                value: paragraph,
+                range: NSRange(location: 0, length: aligned.length)
+            )
+            return aligned
+        }
+        /// Where a cell's text is drawn (top-down image coordinates).
+        func cellTextRect(col: Int, row: Int) -> NSRect {
+            let cellLeft = columnLeft[col] + cellHPadding
+            let cellRight = columnLeft[col + 1] - borderWidth - cellHPadding
+            return NSRect(
+                x: cellLeft,
+                y: rowTop[row] + metrics.vertical(row: row),
+                width: cellRight - cellLeft,
+                height: rowContentHeights[row]
+            )
+        }
+        // (fork: xVanTuring) Cells with a link keep their drawn text, so a click
+        // on the image can be mapped to the link under it.
+        var linkCells: [TableCellText] = []
+        func collectLinks(_ s: NSAttributedString, col: Int, row: Int) {
+            guard col < columnCount, s.length > 0 else { return }
+            var hasLink = false
+            s.enumerateAttribute(.tableCellLink, in: NSRange(location: 0, length: s.length)) { value, _, stop in
+                if value != nil { hasLink = true; stop.pointee = true }
+            }
+            guard hasLink else { return }
+            linkCells.append(TableCellText(row: row, column: col, frame: cellTextRect(col: col, row: row),
+                                           text: alignedCell(s, col: col)))
+        }
+        for (col, cell) in headerCells.enumerated() { collectLinks(cell, col: col, row: 0) }
+        for (rowIdx, row) in bodyCells.enumerated() {
+            for (col, cell) in row.enumerated() { collectLinks(cell, col: col, row: rowIdx + 1) }
+        }
+
         let geometry = TableGeometry(
             columnLeft: columnLeft,
             rowTop: rowTop,
             borderWidth: borderWidth,
             imageSize: size,
             style: style,
-            hiddenCell: hiddenCell
+            hiddenCell: hiddenCell,
+            linkCells: linkCells
         )
         // Flipped image so AppKit handles the y-flip; a manual transform mirror would flip glyphs too.
         let image = NSImage(size: size, flipped: true) { _ in
@@ -839,31 +948,8 @@ extension MarkdownStyler {
                 // The cell open in the in-place editor shows the editor's text
                 // instead (fork: xVanTuring — see `TableGeometry.hiddenCell`).
                 if let hidden = geometry.hiddenCell, hidden.row == row, hidden.column == col { return }
-                let cellLeft = columnLeft[col] + cellHPadding
-                let cellRight = columnLeft[col + 1] - borderWidth - cellHPadding
-                let cellContentWidth = cellRight - cellLeft
-                // Align via NSParagraphStyle; word-wrap fills the row height
-                // measured above (long words fall back to character breaks).
-                let paragraph = NSMutableParagraphStyle()
-                switch alignments[col] {
-                case .left:   paragraph.alignment = .left
-                case .center: paragraph.alignment = .center
-                case .right:  paragraph.alignment = .right
-                }
-                paragraph.lineBreakMode = .byWordWrapping
-                let aligned = NSMutableAttributedString(attributedString: s)
-                aligned.addAttribute(
-                    .paragraphStyle,
-                    value: paragraph,
-                    range: NSRange(location: 0, length: aligned.length)
-                )
-                let drawRect = NSRect(
-                    x: cellLeft,
-                    y: rowTop[row] + metrics.vertical(row: row),
-                    width: cellContentWidth,
-                    height: rowContentHeights[row]
-                )
-                aligned.draw(with: drawRect, options: [.usesLineFragmentOrigin], context: nil)
+                alignedCell(s, col: col).draw(with: cellTextRect(col: col, row: row),
+                                              options: [.usesLineFragmentOrigin], context: nil)
             }
 
             for (col, cell) in headerCells.enumerated() {
