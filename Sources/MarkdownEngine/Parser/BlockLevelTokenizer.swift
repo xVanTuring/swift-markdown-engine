@@ -138,6 +138,8 @@ enum BlockLevelTokenizer {
             if nextStart <= lineStart { break }
             lineStart = nextStart
         }
+        // (fork: xVanTuring) `$$…$$` opening a quote line's content is display math (`QuoteMath`).
+        tokens += QuoteMath.tokens(in: s, range: NSRange(location: 0, length: len))
         return tokens
     }
 

@@ -703,9 +703,21 @@ public struct InlineLatexStyle: Sendable {
 public struct BlockquoteStyle: Sendable {
     /// Extra height (points) added to the default line height for blockquote lines.
     public var extraLineHeight: CGFloat
+    /// (fork: xVanTuring) Obsidian callouts: `> [!type] Title` as the first line of
+    /// a quote level draws that level as a tinted box in the type's colour, with an
+    /// icon and the title (the type's name when none is written).
+    public var rendersCallouts: Bool
+    /// Room (points) inside a callout box above its title and below its last line.
+    public var calloutPadding: CGFloat
+    /// Opacity of a callout box's tint (its type colour).
+    public var calloutTintAlpha: CGFloat
 
-    public init(extraLineHeight: CGFloat = 0) {
+    public init(extraLineHeight: CGFloat = 0, rendersCallouts: Bool = true,
+                calloutPadding: CGFloat = 6, calloutTintAlpha: CGFloat = 0.1) {
         self.extraLineHeight = extraLineHeight
+        self.rendersCallouts = rendersCallouts
+        self.calloutPadding = calloutPadding
+        self.calloutTintAlpha = calloutTintAlpha
     }
 
     public static let `default` = BlockquoteStyle()

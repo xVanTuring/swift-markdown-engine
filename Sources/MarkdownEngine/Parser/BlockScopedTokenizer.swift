@@ -176,6 +176,11 @@ extension MarkdownTokenizer {
             inline = content.length > 0
                 ? InlineASTAdapter.tokens(from: InlineParser.parse(ns, range: content, registry: registry))
                 : []
+        } else if kind == .blockquote, case let math = blockLevel.filter({ $0.kind == .blockLatex }), !math.isEmpty {
+            // (fork: xVanTuring) Display math in a quote is opaque like a `$$` block: no inlines inside it.
+            let ns = sub as NSString
+            inline = QuoteMath.inlineSegments(of: NSRange(location: 0, length: ns.length), excluding: math)
+                .flatMap { InlineASTAdapter.tokens(from: InlineParser.parse(ns, range: $0, registry: registry)) }
         } else {
             inline = InlineASTAdapter.tokens(from: InlineParser.parse(sub, registry: registry))
         }

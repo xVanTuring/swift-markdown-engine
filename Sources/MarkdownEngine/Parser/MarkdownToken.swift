@@ -49,7 +49,9 @@ struct MarkdownToken {
 }
 
 extension MarkdownToken {
-    func standaloneParagraphRange(in text: NSString) -> NSRange? {
+    /// The token's paragraph when nothing else is in it but blanks — and, with
+    /// `allowingQuotePrefix`, block-quote markers (a `> $$…$$` line; fork: xVanTuring).
+    func standaloneParagraphRange(in text: NSString, allowingQuotePrefix: Bool = false) -> NSRange? {
         let paragraphRange = text.paragraphRange(for: range)
         let paragraphText = text.substring(with: paragraphRange) as NSString
         let tokenRelativeRange = NSRange(
@@ -58,7 +60,17 @@ extension MarkdownToken {
         )
         let mutableParagraph = paragraphText.mutableCopy() as! NSMutableString
         mutableParagraph.replaceCharacters(in: tokenRelativeRange, with: "")
-        return mutableParagraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? paragraphRange : nil
+        if mutableParagraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return paragraphRange }
+        guard allowingQuotePrefix else { return nil }
+        let rest = mutableParagraph as NSString
+        for line in QuoteSyntax.lines(in: rest, range: NSRange(location: 0, length: rest.length)) {
+            var k = line.markerEnd
+            while k < line.contentEnd {
+                guard QuoteSyntax.isWS(rest.character(at: k)) else { return nil }
+                k += 1
+            }
+        }
+        return paragraphRange
     }
 
     func containsSelectionOrStandaloneParagraph(_ selectionLocation: Int, in text: NSString) -> Bool {

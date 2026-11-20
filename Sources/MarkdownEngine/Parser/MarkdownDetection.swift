@@ -24,7 +24,11 @@ enum MarkdownDetection {
         var indices: Set<Int> = []
         let caretLocation = selectionRange.location
         for (index, token) in tokens.enumerated() {
-            let start = token.range.location
+            // A block formula reveals from its line's start: inside a quote the
+            // caret can sit on the `> ` before the `$$` (fork: xVanTuring).
+            let start = token.kind == .blockLatex && token.range.location <= text.length
+                ? text.lineRange(for: NSRange(location: token.range.location, length: 0)).location
+                : token.range.location
             let end = NSMaxRange(token.range)
             if selectionRange.length > 0 && (token.kind == .inlineLatex || token.kind == .blockLatex) && NSIntersectionRange(selectionRange, token.range).length > 0 {
                 indices.insert(index)

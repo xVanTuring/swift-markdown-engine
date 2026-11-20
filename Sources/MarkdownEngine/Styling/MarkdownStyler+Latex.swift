@@ -16,17 +16,28 @@ extension MarkdownStyler {
 
     static func styleBlockLatex(_ ctx: StylingContext) -> [StyledRange] {
         var attrs: [StyledRange] = []
+        var quoteLayouts: [Int: QuoteLineLayout] = [:]   // quote line start → layout; one scan per quote block
         for (idx, token) in ctx.scoped(ctx.blockLatexIndexed) {
             if MarkdownDetection.isInsideCodeBlock(range: token.range, codeTokens: ctx.codeTokens) { continue }
             let isActive = ctx.activeTokenIndices.contains(idx)
             let rawLatexContent = ctx.nsText.substring(with: token.contentRange)
-            let latexContent = rawLatexContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            // (fork: xVanTuring) A `$$` inside a block quote: the `>` markers of its continuation lines are the quote's.
+            let quoteLine = QuoteMath.quoteLine(of: token, in: ctx.nsText)
+            let latexContent = (quoteLine != nil ? QuoteMath.latexBody(rawLatexContent) : rawLatexContent)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
 
             attrs.append((token.range, [NSAttributedString.Key.spellingState: 0]))
 
-            guard token.standaloneParagraphRange(in: ctx.nsText) != nil else { continue }
+            guard token.standaloneParagraphRange(in: ctx.nsText, allowingQuotePrefix: quoteLine != nil) != nil else { continue }
 
             let latexFontSize = HeadingHelpers.latexFontSize(for: token, headings: [], baseFont: ctx.baseFont)  // block $$ is never inside a heading
+
+            if let quoteLine {
+                styleQuoteBlockLatex(token: token, quoteLine: quoteLine, rawContent: rawLatexContent, latex: latexContent,
+                                     isActive: isActive, fontSize: latexFontSize, layouts: &quoteLayouts,
+                                     ctx: ctx, attrs: &attrs)
+                continue
+            }
 
             if isActive {
                 appendSecondaryMarkers(for: token, to: &attrs, theme: ctx.configuration.theme)
@@ -69,6 +80,120 @@ extension MarkdownStyler {
             }
         }
         return attrs
+    }
+
+    /// (fork: xVanTuring) A block formula inside a block quote (`> $$…$$`, or `> $$` ⏎ `> …` ⏎ `> $$`).
+    /// Laid out within the quote: centred in the quote's text column, the room above and
+    /// below inside the line box (so the bar runs on unbroken), the spacing below the
+    /// formula's last line what the quote wants there. Muted like the quote's text,
+    /// except in a callout, whose text is in the body colour.
+    private static func styleQuoteBlockLatex(
+        token: MarkdownToken,
+        quoteLine: QuoteSyntax.Line,
+        rawContent: String,
+        latex: String,
+        isActive: Bool,
+        fontSize: CGFloat,
+        layouts: inout [Int: QuoteLineLayout],
+        ctx: StylingContext,
+        attrs: inout [StyledRange]
+    ) {
+        let ns = ctx.nsText
+        let quoteStyle = ctx.configuration.blockquote
+        let style = ctx.configuration.blockLatex
+        let lastLineStart = ns.lineRange(for: NSRange(location: max(token.range.location, NSMaxRange(token.range) - 1), length: 0)).location
+        if layouts[quoteLine.range.location] == nil,
+           let block = QuoteSyntax.blockRange(around: quoteLine.range.location, in: ns) {
+            for q in CalloutScan.layout(of: block, in: ns, callouts: quoteStyle.rendersCallouts) {
+                layouts[q.line.range.location] = q
+            }
+        }
+        let first = layouts[quoteLine.range.location]
+        let last = layouts[lastLineStart] ?? first
+
+        // Same metrics the quote's own lines are styled with (`MarkdownASTStyler`).
+        let baseLineHeight = ceil(ctx.baseFont.ascender - ctx.baseFont.descender + ctx.baseFont.leading)
+        let baseParagraphSpacing = ceil(baseLineHeight * ctx.configuration.paragraph.spacingFactor)
+        let quoteLineHeight = baseLineHeight + quoteStyle.extraLineHeight
+        let slot = MarkdownTextLayoutFragment.blockquoteIndentPerLevel
+        let indent = first?.textIndent ?? (CGFloat(quoteLine.level) * slot + slot * 0.5)
+        let lastSpacing = last?.spacingBelow(baseParagraphSpacing: baseParagraphSpacing, padding: quoteStyle.calloutPadding)
+            ?? baseParagraphSpacing
+
+        var theme = ctx.configuration.theme
+        if first?.innermostCallout == nil {
+            theme.latexLightModeText = theme.mutedText
+            theme.latexDarkModeText = theme.mutedText
+        }
+        guard !latex.isEmpty,
+              let entry = ctx.services.latex.render(latex: latex, mode: .display, fontSize: fontSize, theme: theme) else {
+            appendSecondaryMarkers(for: token, to: &attrs, theme: ctx.configuration.theme)
+            return
+        }
+        // Narrower than the container by the quote's indent: shrink a formula that would not fit.
+        // Room above and below the formula is `previewGap` each — inside a quote the block
+        // spacing of a standalone `$$` (16 / 20 pt) would open holes in the box.
+        var size = entry.size
+        var baselineOffset = entry.baselineOffset
+        let padding = ctx.layoutBridge?.firstTextContainer?.lineFragmentPadding ?? 5
+        let available = effectiveContainerWidth(for: ctx) - indent - padding * 2
+        if available > 0, size.width > available {
+            let k = available / size.width
+            size = CGSize(width: available, height: size.height * k)
+            baselineOffset *= k
+        }
+        let imageBounds = CGRect(x: 0, y: baselineOffset, width: size.width, height: size.height)
+
+        if isActive {
+            appendSecondaryMarkers(for: token, to: &attrs, theme: ctx.configuration.theme)
+            guard style.showsPreviewWhileEditing,
+                  let paraRange = token.standaloneParagraphRange(in: ns, allowingQuotePrefix: true) else { return }
+            var paragraphs: [(content: NSRange, full: NSRange)] = []
+            ns.enumerateSubstrings(in: paraRange, options: .byParagraphs) { _, content, full, _ in
+                paragraphs.append((content, full))
+            }
+            guard let lastPara = paragraphs.last, lastPara.content.length > 0 else { return }
+            // The source lines keep the quote's own paragraph styles; the last one makes room for the preview.
+            let para = NSMutableParagraphStyle()
+            para.firstLineHeadIndent = indent
+            para.headIndent = indent
+            para.minimumLineHeight = quoteLineHeight
+            para.maximumLineHeight = quoteLineHeight
+            para.paragraphSpacing = size.height + style.previewGap * 2 + lastSpacing
+            attrs.append((lastPara.full, [.paragraphStyle: para]))
+            var previewAttrs: [NSAttributedString.Key: Any] = [
+                .latexImage: entry.image,
+                .latexBounds: NSValue(rect: imageBounds),
+                .latexIsBlock: true,
+                .latexBlockOffsetY: quoteLineHeight + style.previewGap,
+            ]
+            if style.centersPreview {
+                previewAttrs[.latexBlockCentered] = true
+                previewAttrs[.latexBlockCenterInset] = indent
+            }
+            // Hung on the last line's text after its `>` markers: a preview that is not
+            // centred starts where that text starts, at the quote's column.
+            let lastLine = QuoteSyntax.line(in: ns, at: lastPara.full.location)
+            let anchorStart = min(max(lastLine.markerEnd, lastPara.content.location), NSMaxRange(lastPara.content) - 1)
+            attrs.append((NSRange(location: anchorStart, length: NSMaxRange(lastPara.content) - anchorStart), previewAttrs))
+            return
+        }
+
+        _ = appendRenderedStandaloneBlock(
+            for: token,
+            rawContent: rawContent,
+            image: entry.image,
+            imageBounds: imageBounds,
+            paragraphSpacingBefore: 0,
+            paragraphSpacing: 0,
+            alignment: .center,
+            mode: .collapsedSource(markerTexts: ["$$", "$$"]),
+            quote: QuoteBlockLayout(indent: indent,
+                                    minimumLineHeight: ceil(size.height + style.previewGap * 2),
+                                    lastLineSpacing: lastSpacing),
+            ctx: ctx,
+            attrs: &attrs
+        )
     }
 
     /// Source stays visible; the rendered formula is drawn in the space reserved
@@ -129,6 +254,19 @@ extension MarkdownStyler {
         let tableRanges = ctx.scoped(ctx.tableIndexed).map { $0.token.range }
         // Quote lines mute their text via foregroundColor, which the LaTeX *image* ignores — render it in mutedText instead so it matches the grey.
         let blockquoteRanges = MarkdownStyler.StylingContext.indexed(ctx.tokens, .blockquote).map { $0.token.range }
+        // (fork: xVanTuring) …except in a callout, whose text keeps the body colour. One scan per quote block.
+        var calloutLines: [Int: Bool] = [:]   // quote line start → its innermost level is a callout
+        func inCallout(_ location: Int) -> Bool {
+            guard ctx.configuration.blockquote.rendersCallouts else { return false }
+            let lineStart = ctx.nsText.lineRange(for: NSRange(location: location, length: 0)).location
+            if let known = calloutLines[lineStart] { return known }
+            if let block = QuoteSyntax.blockRange(around: lineStart, in: ctx.nsText) {
+                for q in CalloutScan.layout(of: block, in: ctx.nsText) {
+                    calloutLines[q.line.range.location] = q.innermostCallout != nil
+                }
+            }
+            return calloutLines[lineStart] ?? false
+        }
         // Built once, not re-scanned per formula (latexFontSize was O(#latex × #tokens)).
         let headings = ctx.scoped(MarkdownStyler.StylingContext.indexed(ctx.tokens, .heading)).map { $0.token }
         // Each textWidth is a CoreText measurement; the "$" marker width is
@@ -162,7 +300,8 @@ extension MarkdownStyler {
                 }
             } else {
                 var renderTheme = ctx.configuration.theme
-                if blockquoteRanges.contains(where: { NSLocationInRange(token.range.location, $0) }) {
+                if blockquoteRanges.contains(where: { NSLocationInRange(token.range.location, $0) }),
+                   !inCallout(token.range.location) {
                     renderTheme.latexLightModeText = renderTheme.mutedText
                     renderTheme.latexDarkModeText = renderTheme.mutedText
                 }

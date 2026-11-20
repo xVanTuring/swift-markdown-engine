@@ -81,7 +81,7 @@ enum MarkdownASTStyler {
 
         // Text/regex passes (AST-agnostic); AST code ranges drive the "skip inside code" checks.
         let codeRanges = collectCodeRanges(in: blocks)
-        let checkboxRanges = collectCheckboxRanges(in: blocks)
+        let checkboxRanges = collectCheckboxRanges(in: blocks) + collectCalloutMarkerRanges(in: blocks, ctx: ctx)
         let linkRanges = collectLinkRanges(in: blocks)
         styleAutoLinks(ctx: ctx, codeRanges: codeRanges, linkRanges: linkRanges, into: &attrs)
         styleIncompleteLinkBrackets(ctx: ctx, codeRanges: codeRanges, checkboxRanges: checkboxRanges, into: &attrs)
@@ -687,8 +687,18 @@ enum MarkdownASTStyler {
             styleInlines(inlines, font: headingFont, ctx: ctx, into: &attrs)
 
         case .blockquote(let range, let inlines):
-            styleBlockquote(range: range, latexRanges: inlineLatexRanges(in: inlines), ctx: ctx, into: &attrs)
-            styleInlines(inlines, font: font, ctx: ctx, into: &attrs)
+            let titles = styleBlockquote(range: range, latexRanges: inlineLatexRanges(in: inlines), ctx: ctx, into: &attrs)
+            if titles.isEmpty {
+                styleInlines(inlines, font: font, ctx: ctx, into: &attrs)
+            } else {
+                // A callout title is bold: emphasis inside it composes on the bold font.
+                let bold = adding(.bold, to: font)
+                for node in inlines {
+                    let start = inlineStart(node)
+                    let inTitle = titles.contains { NSLocationInRange(start, $0) }
+                    styleInlines([node], font: inTitle ? bold : font, ctx: ctx, into: &attrs)
+                }
+            }
 
         case .list(_, let items):
             for item in items {
@@ -752,63 +762,129 @@ enum MarkdownASTStyler {
         return ranges
     }
 
-    /// Per-line blockquote: indent, mute content, hide/show `>` markers, tag first char with bar level.
-    private static func styleBlockquote(range: NSRange, latexRanges: [NSRange], ctx: Ctx, into attrs: inout [StyledRange]) {
-        let indentPerLevel = MarkdownTextLayoutFragment.blockquoteIndentPerLevel
-        var lineStart = range.location
-        let end = NSMaxRange(range)
-        while lineStart < end {
-            let line = ctx.ns.lineRange(for: NSRange(location: lineStart, length: 0))
-            let lineEnd = NSMaxRange(line)
-            var i = line.location
-            var indent = 0
-            while i < lineEnd, indent < 3, ctx.ns.character(at: i) == 0x20 || ctx.ns.character(at: i) == 0x09 {
-                i += 1; indent += 1
-            }
-            let markerStart = i
-            var level = 0
-            var j = i
-            while j < lineEnd, ctx.ns.character(at: j) == 0x3E /* > */ {
-                level += 1; j += 1
-                if j < lineEnd, ctx.ns.character(at: j) == 0x20 || ctx.ns.character(at: j) == 0x09 { j += 1 }
-            }
-            defer { lineStart = lineEnd }
-            guard level > 0 else { continue }
+    private static func inlineStart(_ node: InlineNode) -> Int {
+        switch node {
+        case .text(let r): return r.location
+        case .code(let r, _), .emphasis(_, let r, _, _), .link(let r, _, _, _, _), .image(let r, _, _, _),
+             .wikiLink(let r, _, _, _), .imageEmbed(let r, _, _), .inlineLatex(let r, _, _), .escape(let r, _, _):
+            return r.location
+        case .ext(let e): return e.range.location
+        }
+    }
 
-            var contentEnd = lineEnd
-            if contentEnd > j {
-                let last = ctx.ns.character(at: contentEnd - 1)
-                if last == 0x0A || last == 0x0D { contentEnd -= 1 }
-            }
-            let markerRange = NSRange(location: markerStart, length: j - markerStart)
-            let contentRange = NSRange(location: j, length: max(0, contentEnd - j))
-            let tokenRange = NSRange(location: line.location, length: contentEnd - line.location)
+    /// Per-line blockquote: indent, mute content, hide/show `>` markers, tag each line with its
+    /// bar level and decoration. (fork: xVanTuring) Callout levels (`> [!type] Title`, `QuoteSyntax`)
+    /// keep their text in the body colour, the header gets an icon and a bold coloured title,
+    /// and the box gets room above its title and below its last line. Returns the title ranges.
+    @discardableResult
+    private static func styleBlockquote(range: NSRange, latexRanges: [NSRange], ctx: Ctx, into attrs: inout [StyledRange]) -> [NSRange] {
+        let quoteStyle = ctx.config.blockquote
+        let pad = quoteStyle.calloutPadding
+        var titles: [NSRange] = []
+        for q in CalloutScan.layout(of: range, in: ctx.ns, callouts: quoteStyle.rendersCallouts) {
+            let l = q.line
+            let markerRange = l.markerRange
+            let contentRange = l.contentRange
+            let tokenRange = l.textRange
 
-            let textIndent = CGFloat(level) * indentPerLevel + indentPerLevel * 0.5
+            let textIndent = q.textIndent
             let para = NSMutableParagraphStyle()
             para.firstLineHeadIndent = textIndent
             para.headIndent = textIndent
-            let lineHeight = ctx.baseLineHeight + ctx.config.blockquote.extraLineHeight
+            // A callout's title line is taller by the box's top padding (the room sits above the text).
+            let lineHeight = ctx.baseLineHeight + quoteStyle.extraLineHeight + (q.header != nil ? pad : 0)
             para.minimumLineHeight = lineHeight
             // Uncapped where a `$…$` sits, so a tall formula can grow the line (see `styleListItem`).
-            let lineHasLatex = latexRanges.contains { NSIntersectionRange($0, line).length > 0 }
+            let lineHasLatex = latexRanges.contains { NSIntersectionRange($0, l.range).length > 0 }
             para.maximumLineHeight = lineHasLatex ? 0 : lineHeight
-            // Inner quote lines stay tight (0); the LAST line gets the normal
-            para.paragraphSpacing = (lineEnd >= end) ? ctx.baseParagraphSpacing : 0
+            // Inner quote lines stay tight (0); the LAST line gets the normal paragraph spacing,
+            // a callout ending here its bottom padding on top.
+            para.paragraphSpacing = q.spacingBelow(baseParagraphSpacing: ctx.baseParagraphSpacing, padding: pad)
             para.paragraphSpacingBefore = 0
             attrs.append((ctx.ns.paragraphRange(for: tokenRange), [.paragraphStyle: para]))
 
             if contentRange.length > 0 {
-                attrs.append((contentRange, [.foregroundColor: ctx.theme.mutedText]))
+                attrs.append((contentRange, [.foregroundColor: q.innermostCallout != nil ? ctx.theme.bodyText : ctx.theme.mutedText]))
             }
-            if ctx.isActive(tokenRange) {
+            let active = ctx.isActive(tokenRange)
+            if active {
                 attrs.append((markerRange, [.foregroundColor: ctx.theme.mutedText]))
             } else {
                 attrs.append((markerRange, [.foregroundColor: NSColor.clear, .font: ctx.inlineMarkerFont]))
             }
             // Whole line, not just the first char, so each soft-wrapped visual line
-            attrs.append((tokenRange, [.blockquoteLevel: level]))
+            attrs.append((tokenRange, [
+                .blockquoteLevel: l.level,
+                .blockquoteDecoration: QuoteLineDecoration.make(
+                    levels: q.levels,
+                    continues: q.continues,
+                    gapBelow: q.isLastInBlock ? ctx.baseParagraphSpacing : 0),
+            ]))
+
+            if let header = q.header {
+                if let title = header.titleRange { titles.append(title) }
+                styleCalloutHeader(header, active: active, ctx: ctx, into: &attrs)
+            }
         }
+        return titles
+    }
+
+    /// The callout's first line: a bold title in the type colour; with the caret
+    /// elsewhere, `[!type]` collapses to an icon (followed by the type's name when
+    /// no title is written), drawn on the engine's inline-image channel.
+    private static let boldFontCache = NSCache<NSFont, NSFont>()
+
+    private static func styleCalloutHeader(_ header: CalloutHeader, active: Bool, ctx: Ctx, into attrs: inout [StyledRange]) {
+        let color = header.type.color
+        let titleFont: NSFont
+        if let cached = boldFontCache.object(forKey: ctx.baseFont) {
+            titleFont = cached
+        } else {
+            titleFont = adding(.bold, to: ctx.baseFont)
+            boldFontCache.setObject(titleFont, forKey: ctx.baseFont)
+        }
+        if let title = header.titleRange {
+            attrs.append((title, [.font: titleFont, .foregroundColor: color]))
+        }
+        // `[!x]` reads as an unfinished link to the incomplete-link pass — muted here instead, never link-coloured.
+        guard !active, header.markerRange.length > 0,
+              let icon = CalloutHeaderImage.image(type: header.type,
+                                                  title: header.titleRange == nil ? header.defaultTitle : nil,
+                                                  font: ctx.baseFont, titleFont: titleFont) else {
+            attrs.append((header.markerRange, [.foregroundColor: ctx.theme.mutedText]))
+            return
+        }
+        let markerFont = ctx.inlineMarkerFont
+        let imageBounds = CGRect(x: 0, y: icon.descent, width: icon.image.size.width, height: icon.image.size.height)
+        let firstCharRange = NSRange(location: header.markerRange.location, length: 1)
+        let firstChar = ctx.ns.substring(with: firstCharRange)
+        attrs.append((firstCharRange, [
+            .latexImage: icon.image,
+            .latexBounds: NSValue(rect: imageBounds),
+            .foregroundColor: NSColor.clear,
+            .font: markerFont,
+            .kern: icon.image.size.width - HeadingHelpers.textWidth(firstChar, font: markerFont),
+        ]))
+        if header.markerRange.length > 1 {
+            let restRange = NSRange(location: header.markerRange.location + 1, length: header.markerRange.length - 1)
+            let restText = ctx.ns.substring(with: restRange)
+            attrs.append((restRange, [
+                .foregroundColor: NSColor.clear,
+                .font: markerFont,
+                .kern: -MarkdownStyler.hiddenRunKern(restText, font: markerFont),
+            ]))
+        }
+    }
+
+    /// Callout header markers (`[!type]` …) in the styled blocks — kept out of the incomplete-link pass.
+    private static func collectCalloutMarkerRanges(in blocks: [BlockNode], ctx: Ctx) -> [NSRange] {
+        guard ctx.config.blockquote.rendersCallouts else { return [] }
+        var ranges: [NSRange] = []
+        for block in blocks where ctx.inScope(block.range) {
+            guard case .blockquote(let range, _) = block else { continue }
+            ranges += CalloutScan.headerMarkers(in: range, in: ctx.ns)
+        }
+        return ranges
     }
 
     private static func styleCodeBlock(range: NSRange, ctx: Ctx, into attrs: inout [StyledRange]) {

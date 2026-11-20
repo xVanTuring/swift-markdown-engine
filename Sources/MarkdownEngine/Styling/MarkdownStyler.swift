@@ -345,6 +345,17 @@ extension MarkdownStyler {
         }
     }
 
+    /// (fork: xVanTuring) A block formula inside a block quote: its line keeps the
+    /// quote's indent (the formula centres within the quote), grows to
+    /// `minimumLineHeight` (the formula plus room above and below — inside the
+    /// line box, so the quote bar runs on unbroken), and the token's last line
+    /// keeps the spacing the quote wants below it (`lastLineSpacing`).
+    struct QuoteBlockLayout {
+        var indent: CGFloat
+        var minimumLineHeight: CGFloat
+        var lastLineSpacing: CGFloat
+    }
+
     enum RenderedStandaloneBlockMode {
         case collapsedSource(markerTexts: [String])
         case visibleSource(imageGap: CGFloat)
@@ -366,16 +377,22 @@ extension MarkdownStyler {
         alignment: NSTextAlignment,
         mode: RenderedStandaloneBlockMode,
         restyleOnWidthChange: Bool = false,
+        quote: QuoteBlockLayout? = nil,
         ctx: StylingContext,
         attrs: inout [StyledRange]
     ) -> Bool {
-        guard let paraRange = token.standaloneParagraphRange(in: ctx.nsText) else { return false }
+        guard let paraRange = token.standaloneParagraphRange(in: ctx.nsText, allowingQuotePrefix: quote != nil) else { return false }
         attrs.append((paraRange, [.renderedBlockRange: NSValue(range: paraRange)]))
 
         let para = NSMutableParagraphStyle()
         let baseLineHeight = layoutBridgeDefaultLineHeight(for: ctx.baseFont, using: ctx.layoutBridge)
         para.paragraphSpacingBefore = max(para.paragraphSpacingBefore, paragraphSpacingBefore)
         para.alignment = alignment
+        if let quote {
+            para.headIndent = quote.indent
+            para.firstLineHeadIndent = quote.indent
+            para.minimumLineHeight = quote.minimumLineHeight
+        }
         let widthChangeAnchorAttrs: [NSAttributedString.Key: Any] = restyleOnWidthChange
             ? [.scrollableBlockFullRange: NSValue(range: paraRange)]
             : [:]
@@ -394,6 +411,7 @@ extension MarkdownStyler {
                 neededLineHeight: imageBounds.height,
                 extraAnchorAttrs: widthChangeAnchorAttrs,
                 markerTexts: markerTexts,
+                lastLineSpacing: quote?.lastLineSpacing ?? 0,
                 ctx: ctx,
                 attrs: &attrs
             )
@@ -466,6 +484,7 @@ extension MarkdownStyler {
         neededLineHeight: CGFloat,
         extraAnchorAttrs: [NSAttributedString.Key: Any],
         markerTexts: [String],
+        lastLineSpacing: CGFloat = 0,
         ctx: StylingContext,
         attrs: inout [StyledRange]
     ) {
@@ -490,8 +509,15 @@ extension MarkdownStyler {
 
         var paragraphAttributes: [StyledRange] = []
         ctx.nsText.enumerateSubstrings(in: paraRange, options: .byParagraphs) { _, _, enclosingRange, _ in
+            let isLast = NSMaxRange(enclosingRange) >= NSMaxRange(paraRange)
             if NSLocationInRange(anchorLocation, enclosingRange) {
+                if isLast, lastLineSpacing > 0 { para.paragraphSpacing = max(para.paragraphSpacing, lastLineSpacing) }
                 paragraphAttributes.append((enclosingRange, [.paragraphStyle: para]))
+            } else if isLast, lastLineSpacing > 0 {
+                // A quote's closing `$$` line may end the quote: it keeps the spacing the quote wants below it.
+                let last = collapsedPara.mutableCopy() as! NSMutableParagraphStyle
+                last.paragraphSpacing = lastLineSpacing
+                paragraphAttributes.append((enclosingRange, [.paragraphStyle: last]))
             } else {
                 paragraphAttributes.append((enclosingRange, [.paragraphStyle: collapsedPara]))
             }

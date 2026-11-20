@@ -368,6 +368,36 @@ extension NativeTextViewCoordinator {
             }
         }
 
+        // (fork: xVanTuring) A callout styles every line of its quote from the
+        // header line (colour, body text colour, box padding on the last line):
+        // an edit anywhere in it — or one that ends it, splits it, or removes its
+        // header (the storage still carries callout decoration) — restyles the
+        // whole quote. Plain quotes keep the narrow scope.
+        if configuration.blockquote.rendersCallouts, let storage = tv.textStorage {
+            let near = [safeEditedRange, paragraphRange, previousParagraph, nextParagraph]
+                .filter { $0.location != NSNotFound }
+            let lo = near.map(\.location).min() ?? 0
+            let hi = near.map { NSMaxRange($0) }.max() ?? 0
+            let blocks = parsed.blocks
+            var first = 0, last = blocks.count
+            while first < last {               // first block ending after `lo`
+                let m = (first + last) / 2
+                if NSMaxRange(blocks[m].range) <= lo { first = m + 1 } else { last = m }
+            }
+            var bi = first
+            while bi < blocks.count, blocks[bi].range.location <= hi {
+                let block = blocks[bi]
+                bi += 1
+                guard block.kind == .blockquote else { continue }
+                let stale = block.range.location < storage.length
+                    && (storage.attribute(.blockquoteDecoration, at: block.range.location, effectiveRange: nil)
+                        as? QuoteLineDecoration)?.hasCallout == true
+                if stale || CalloutScan.hasCallout(block.range, in: fullText) {
+                    effectiveParagraphCandidates.append(block.range)
+                }
+            }
+        }
+
         PerfTrace.measure("restyle") { restyleTextView(tv, paragraphCandidates: effectiveParagraphCandidates, tokens: tokens, classified: parsed.classified, blocks: parsed.blocks) }
         PerfTrace.measure("codeSel") { updateCodeBlockSelection(textView: tv, parsed: parsed) }
         if wtActive {

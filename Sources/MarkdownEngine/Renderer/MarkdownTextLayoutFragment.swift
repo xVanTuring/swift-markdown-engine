@@ -160,6 +160,10 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         for fill in blockBackgroundFills(at: .zero) {
             bounds = bounds.union(fill.rect)
         }
+        // Quote bars and callout boxes reach down through the paragraph spacing (fork: xVanTuring).
+        if hasBlockquote {
+            bounds = bounds.union(CGRect(x: bounds.minX, y: 0, width: bounds.width, height: layoutFragmentFrame.height))
+        }
         return bounds
     }
 
@@ -177,6 +181,9 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
         // 1b. Line-box fills (`==highlight==` and friends), behind text
         drawBlockBackgrounds(at: point, in: context)
+
+        // 1c. Callout boxes' tint, behind text (fork: xVanTuring)
+        drawCalloutTints(at: point, in: context)
 
         // 2. LaTeX images (behind text — hidden markers are invisible anyway)
         drawLatexImages(at: point, in: context)
@@ -582,7 +589,9 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         if textStorage?.attribute(.latexBlockCentered, at: attrRange.location, effectiveRange: nil) as? Bool == true,
            let containerWidth = textLayoutManager?.textContainer?.size.width {
             let containerX = point.x - layoutFragmentFrame.origin.x
-            x = containerX + (containerWidth - imageBounds.width) / 2
+            // Inside a quote: centred in the quote's text column (fork: xVanTuring).
+            let inset = textStorage?.attribute(.latexBlockCenterInset, at: attrRange.location, effectiveRange: nil) as? CGFloat ?? 0
+            x = containerX + inset + (containerWidth - inset - imageBounds.width) / 2
         }
         return CGRect(x: x, y: yPosition,
                        width: imageBounds.width, height: imageBounds.height)
@@ -825,48 +834,102 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
     // MARK: - Blockquote Bars
 
-    /// Paint `level` vertical bars in the left gutter of every line that
-    /// carries `.blockquoteLevel`. Each line paints its own segment, so a
-    /// run of quote lines reads as one continuous bar.
-    private func drawBlockquoteBars(at point: CGPoint, in context: CGContext) {
-        guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return }
+    /// One quote level's segment on one line: its bar's x, top and bottom, and
+    /// the callout colour when that level is a callout.
+    struct QuoteSegment {
+        let x: CGFloat
+        let top: CGFloat
+        let bottom: CGFloat
+        let color: NSColor?
+    }
+
+    /// Every quote level's segment on every line of this fragment, relative to
+    /// `point`. Each line paints its own, so a run of quote lines reads as one
+    /// continuous bar. (fork: xVanTuring) On the fragment's last line a level
+    /// reaches down through the paragraph spacing — all of it when the level runs
+    /// on into the next line, else all but the gap after the quote
+    /// (`QuoteLineDecoration`): a formula preview or a callout's bottom padding
+    /// sits inside the bar / box that way.
+    func quoteSegments(at point: CGPoint) -> [QuoteSegment] {
+        guard let ts = textStorage, let range = fragmentNSRange, range.length > 0 else { return [] }
         var anyLevel = false
         ts.enumerateAttribute(.blockquoteLevel, in: range, options: []) { value, _, stop in
             if value is Int { anyLevel = true; stop.pointee = true }
         }
-        guard anyLevel else { return }
+        guard anyLevel else { return [] }
 
+        let indentPerLevel = Self.blockquoteIndentPerLevel
+        let fragLocation = range.location
+        let leftEdge = point.x - layoutFragmentFrame.origin.x
+        // TextKit 2 appends a synthetic trailing empty line fragment whose
+        // characterRange lands at exactly `tsLen` — `attribute(at:)` needs
+        // a strictly in-bounds index, so skip the sentinel.
+        let lines = textLineFragments.filter { fragLocation + $0.characterRange.location < ts.length }
+        let fragmentBottom = point.y + layoutFragmentFrame.height
+        var out: [QuoteSegment] = []
+        for (index, lineFragment) in lines.enumerated() {
+            let docStart = fragLocation + lineFragment.characterRange.location
+            guard let level = ts.attribute(.blockquoteLevel, at: docStart, effectiveRange: nil) as? Int else { continue }
+            let decoration = ts.attribute(.blockquoteDecoration, at: docStart, effectiveRange: nil) as? QuoteLineDecoration
+            let tb = lineFragment.typographicBounds
+            // tb.origin.y is already relative to this layout fragment.
+            let top = point.y + tb.origin.y
+            let lineBottom = top + tb.height
+            let isLast = index == lines.count - 1
+            for i in 0..<level {
+                var bottom = lineBottom
+                if isLast, let decoration, i < decoration.continues.count {
+                    bottom = decoration.continues[i]
+                        ? max(lineBottom, fragmentBottom)
+                        : max(lineBottom, fragmentBottom - decoration.gapBelow)
+                }
+                let color = decoration.flatMap { i < $0.colors.count ? $0.colors[i] : nil }
+                out.append(QuoteSegment(x: leftEdge + CGFloat(i) * indentPerLevel + indentPerLevel * 0.25,
+                                        top: top, bottom: bottom, color: color))
+            }
+        }
+        return out
+    }
+
+    /// Paint the quote bars: grey, or the callout's colour.
+    private func drawBlockquoteBars(at point: CGPoint, in context: CGContext) {
+        let segments = quoteSegments(at: point)
+        guard !segments.isEmpty else { return }
         let theme = (textLayoutManager?.textContainer?.textView as? NativeTextView)?
             .configuration.theme ?? .default
-        let indentPerLevel = Self.blockquoteIndentPerLevel
-        let barWidth = Self.blockquoteBarWidth
 
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         let nsContext = NSGraphicsContext(cgContext: context, flipped: true)
         NSGraphicsContext.current = nsContext
-        theme.mutedText.withAlphaComponent(0.5).setFill()
 
-        let fragLocation = fragmentNSRange?.location ?? 0
-        let leftEdge = point.x - layoutFragmentFrame.origin.x
-        for lineFragment in textLineFragments {
-            let lr = lineFragment.characterRange
-            let docStart = fragLocation + lr.location
-            // TextKit 2 appends a synthetic trailing empty line fragment whose
-            // characterRange lands at exactly `tsLen` — `attribute(at:)` needs
-            // a strictly in-bounds index, so skip the sentinel.
-            guard docStart < ts.length else { continue }
-            let tb = lineFragment.typographicBounds
-            if let level = ts.attribute(.blockquoteLevel, at: docStart, effectiveRange: nil) as? Int {
-                // tb.origin.y is already relative to this layout fragment.
-                let barY = point.y + tb.origin.y
-                for i in 0..<level {
-                    let barX = leftEdge + CGFloat(i) * indentPerLevel + indentPerLevel * 0.25
-                    NSBezierPath(rect: CGRect(
-                        x: barX, y: barY, width: barWidth, height: tb.height
-                    )).fill()
-                }
-            }
+        let plain = theme.mutedText.withAlphaComponent(0.5)
+        for segment in segments {
+            (segment.color ?? plain).setFill()
+            NSBezierPath(rect: CGRect(x: segment.x, y: segment.top,
+                                      width: Self.blockquoteBarWidth, height: segment.bottom - segment.top)).fill()
+        }
+    }
+
+    /// (fork: xVanTuring) A callout level's tint: from its bar to the container's right edge.
+    private func drawCalloutTints(at point: CGPoint, in context: CGContext) {
+        let segments = quoteSegments(at: point).filter { $0.color != nil }
+        guard !segments.isEmpty else { return }
+        let alpha = (textLayoutManager?.textContainer?.textView as? NativeTextView)?
+            .configuration.blockquote.calloutTintAlpha ?? 0.1
+        let containerWidth = textLayoutManager?.textContainer?.size.width ?? layoutFragmentFrame.width
+        let right = point.x - layoutFragmentFrame.origin.x + containerWidth
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let nsContext = NSGraphicsContext(cgContext: context, flipped: true)
+        NSGraphicsContext.current = nsContext
+
+        for segment in segments {
+            guard let color = segment.color, right > segment.x else { continue }
+            color.withAlphaComponent(alpha).setFill()
+            NSBezierPath(rect: CGRect(x: segment.x, y: segment.top,
+                                      width: right - segment.x, height: segment.bottom - segment.top)).fill()
         }
     }
 

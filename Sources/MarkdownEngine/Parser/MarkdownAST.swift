@@ -169,7 +169,12 @@ enum DocumentAST {
         case .heading:
             return heading(block.range, ns, scoped: scoped, registry: registry)
         case .blockquote:
-            return .blockquote(range: block.range, inlines: scoped ? InlineParser.parse(ns, range: block.range, registry: registry) : [])
+            guard scoped else { return .blockquote(range: block.range, inlines: []) }
+            // (fork: xVanTuring) Display math in a quote is opaque: inlines skip it (`QuoteMath`).
+            let math = QuoteMath.tokens(in: ns, range: block.range)
+            let inlines = QuoteMath.inlineSegments(of: block.range, excluding: math)
+                .flatMap { InlineParser.parse(ns, range: $0, registry: registry) }
+            return .blockquote(range: block.range, inlines: inlines)
         case .list:
             return list(
                 block.range,
