@@ -180,7 +180,9 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         // `v2`: images are now sized by their ink, not only by SwiftMath's ascent/descent —
         // entries written before that are cut off at the bottom and must not be reused.
         // `v3`: CJK characters are drawn (`standInsForCJK`); earlier entries left them out.
-        let composite = "v3|\(key.latex)|\(mode)|\(key.fontSize)|\(key.isDarkMode)|\(key.lightColorRGB)|\(key.darkColorRGB)"
+        // `v4`: `\\[6pt]` adds space below a row, `=` in `aligned` has its space on the left again and
+        // matrix cells are in text style (`LatexTables.swift`); earlier entries differ.
+        let composite = "v4|\(key.latex)|\(mode)|\(key.fontSize)|\(key.isDarkMode)|\(key.lightColorRGB)|\(key.darkColorRGB)"
         let digest = SHA256.hash(data: Data(composite.utf8))
         return digest.map { String(format: "%02x", $0) }.joined() + ".mathcache"
     }
@@ -355,14 +357,14 @@ public final class SwiftMathBridge: LatexRenderer, @unchecked Sendable {
         // stale state carries between formulas.
         let mathLabel = reusableLabel
         // Parsed here instead of through `mathLabel.latex` so CJK can get through the parser
-        // (`standInsForCJK`) and binary signs beside spacing can be settled first
+        // (`standInsForCJK`), table environments SwiftMath cannot read are built by the bridge
+        // (`parseFormula`, LatexTables.swift), and binary signs beside spacing can be settled first
         // (`settleBinarySigns`). A parse error still leaves no display list.
         var parseError: NSError?
-        let (parseable, cjk) = Self.standInsForCJK(latex)
-        let mathList = MTMathListBuilder.build(fromString: parseable, error: &parseError)
+        let mathList = Self.parseFormula(latex, error: &parseError)
         if parseError == nil {
-            Self.restoreCJK(in: mathList, cjk)
             Self.settleBinarySigns(in: mathList)
+            Self.keepTablesIntactInLabel(mathList)   // before `mathList =`, which edits tables otherwise
         }
         mathLabel.mathList = parseError == nil ? mathList : nil
         mathLabel.fontSize = fontSize
