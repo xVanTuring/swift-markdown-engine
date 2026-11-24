@@ -47,6 +47,16 @@ final class NativeTextView: NSTextView {
     var pendingFullLayoutMeasure = false
     /// Coalesces wide-table overlay updates to once per runloop (resize fires many per frame).
     var pendingWideTableOverlayUpdate = false
+    /// (fork) An overlay reconcile is running. Moving / creating an overlay re-tiles its scroll
+    /// view, which can post a bounds change → `contentDidScroll` → `layoutTableCellEditor` →
+    /// `cellFrame` → another reconcile before this one has registered the overlay — an endless
+    /// loop (2026-11-24 stack overflow in UniReader). While set, nested reconciles are skipped and
+    /// cell-editor layouts are deferred until the reconcile is done.
+    var isPerformingWideTableOverlayUpdate = false
+    /// (fork) A cell-editor layout was asked for during an overlay reconcile; run it afterwards.
+    var tableCellEditorLayoutDeferred = false
+    /// (fork) `layoutTableCellEditor` is running; a nested call returns at once (the outer one places the editor).
+    var isLayingOutTableCellEditor = false
     /// Coalesces table restyles to the latest width once per run-loop turn.
     var pendingTableWidthChangeUpdate = false
     // MARK: Live width change (fork: perf/live-resize)

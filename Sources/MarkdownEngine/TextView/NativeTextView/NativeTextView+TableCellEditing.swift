@@ -638,6 +638,11 @@ extension NativeTextView {
     /// table or cell can no longer be found.
     @discardableResult
     func layoutTableCellEditor() -> Bool {
+        // (fork) Nested call (from a scroll notification while this one moves overlays): the
+        // outer call finishes the placement. See `isLayingOutTableCellEditor`.
+        if isLayingOutTableCellEditor { return tableEditSession != nil }
+        isLayingOutTableCellEditor = true
+        defer { isLayingOutTableCellEditor = false }
         layoutTableSelection()
         layoutTableGrips()
         guard let session = tableEditSession, !session.isFinishing else { return false }

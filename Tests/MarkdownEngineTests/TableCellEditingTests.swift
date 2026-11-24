@@ -21,11 +21,12 @@ struct TableCellEditingTests {
     private static let tableStart = 7
 
     private func makeEditor(
-        _ storage: String = doc, editsInPlace: Bool = true
+        _ storage: String = doc, editsInPlace: Bool = true, readingWidth: CGFloat? = nil
     ) -> (NativeTextView, NativeTextViewCoordinator) {
         _ = NSApplication.shared
         var configuration = MarkdownEditorConfiguration.default
         configuration.editsTablesInPlace = editsInPlace
+        configuration.readingWidth = readingWidth
         let textView = NativeTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         textView.isEditable = true
         textView.configuration = configuration
@@ -267,6 +268,33 @@ struct TableCellEditingTests {
         // Vertically it sits inside the overlay's band, on the right row.
         #expect(editor.frame.minY >= overlay.frame.minY - 1)
         #expect(editor.frame.maxY <= overlay.frame.maxY + 1)
+    }
+
+    /// Typing into a wide table's cell until its row grows (fork, 2026-11-24 stack overflow in UniReader,
+    /// which uses a reading column): writing the cell back changes the table's source, so `cellFrame`
+    /// finds no overlay for the new source and reconciles. The reconcile set the NEW overlay's frame
+    /// before registering it; the frame re-tiled its scroll view (breakout: content inset) → bounds-change
+    /// notification → `contentDidScroll` → `layoutTableCellEditor` → `cellFrame` found no overlay again →
+    /// another reconcile → … The row must grow and the editor must follow, without re-entering.
+    @Test(arguments: [nil, 600] as [CGFloat?])
+    func growingAWideTableRowWhileEditingDoesNotRecurse(readingWidth: CGFloat?) throws {
+        let (tv, coordinator) = makeEditor(Self.wideTable, readingWidth: readingWidth); defer { withExtendedLifetime(coordinator) {} }
+        let overlayBefore = try #require(tv.wideTableOverlays.values.first)
+        overlayBefore.horizontalOffset = 600   // a column off to the right: the table is scrolled sideways
+        #expect(tv.beginTableCellEditing(tableStart: 0, row: 1, column: 7))
+        let heightBefore = overlayBefore.frame.height
+        let editor = try #require(tv.tableEditSession?.editor)
+        editor.string = (0..<6).map { "第\($0)行很长的一段中文内容" }.joined(separator: "\n")
+        tv.syncTableCellToDocument()
+
+        let image = try #require(currentTableImage(tv))
+        let overlay = try #require(tv.wideTableOverlays.values.first)
+        #expect(overlay.currentImage === image)
+        #expect(overlay.frame.height > heightBefore + 1, "the edited row grew")
+        let cell = try #require(image.tableGeometry?.cellRect(row: 1, column: 7))
+        let open = try #require(tv.tableEditSession?.editor)
+        #expect(!open.isHidden)
+        #expect(abs(open.frame.height - cell.height) < 1)
     }
 
     @Test func theEditorFollowsTheOverlayAfterAnAlignmentChange() throws {

@@ -255,6 +255,12 @@ final class WideTableOverlay: NSScrollView {
 
     @objc private func contentDidScroll() {
         guard let owner = ownerTextView, owner.tableEditSession != nil else { return }
+        // Fired by the reconcile itself moving / creating this overlay: the overlay set is
+        // half-updated, so laying out now would start another reconcile. Do it afterwards.
+        if owner.isPerformingWideTableOverlayUpdate {
+            owner.tableCellEditorLayoutDeferred = true
+            return
+        }
         owner.layoutTableCellEditor()
     }
 
@@ -440,6 +446,17 @@ extension NativeTextView {
 
         let containerWidth = container.size.width
         guard containerWidth.isFinite, containerWidth > 0 else { return }
+        // (fork) Re-entrancy guard, see `isPerformingWideTableOverlayUpdate`. A nested call comes
+        // from `cellFrame` wanting fresh overlays — this run is producing exactly that.
+        if isPerformingWideTableOverlayUpdate { return }
+        isPerformingWideTableOverlayUpdate = true
+        defer {
+            isPerformingWideTableOverlayUpdate = false
+            if tableCellEditorLayoutDeferred {
+                tableCellEditorLayoutDeferred = false
+                if tableEditSession != nil { layoutTableCellEditor() }
+            }
+        }
         // Breakout: tables span full width, flush with the text column's left.
         let breakout = configuration.readingWidth != nil
         // Breakout host: the full-width reading-column container, else the text view itself.
@@ -535,25 +552,27 @@ extension NativeTextView {
             // Breakout: table starts at the text column's left edge; the left margin is scrollable space.
             let leftContentInset: CGFloat = breakout ? max(0, columnLeft) : 0
 
+            // (fork) Image, anchor and registration first, frame last: setting the frame re-tiles
+            // the scroll view and can notify observers, who must already see the new state.
             if let existing = wideTableOverlays[sourceID] {
+                existing.updateImage(image)
+                existing.anchorTextLocation = attrRange.location
+                existing.leftContentInset = leftContentInset
                 if !existing.frame.equalTo(overlayFrame) {
                     // Invalidate both old + new region so the vacated area redraws.
                     host.setNeedsDisplay(existing.frame)
                     existing.frame = overlayFrame
                     host.setNeedsDisplay(overlayFrame)
                 }
-                existing.leftContentInset = leftContentInset
-                existing.updateImage(image)
-                existing.anchorTextLocation = attrRange.location
             } else {
                 let overlay = WideTableOverlay(
                     sourceID: sourceID, image: image,
                     ownerTextView: self, anchorLocation: attrRange.location
                 )
+                wideTableOverlays[sourceID] = overlay
                 overlay.frame = overlayFrame
                 overlay.leftContentInset = leftContentInset
                 host.addSubview(overlay)
-                wideTableOverlays[sourceID] = overlay
                 let savedOffset = tableHorizontalScrollOffsets[sourceID] ?? 0
                 if savedOffset > 0 { overlay.horizontalOffset = savedOffset }
             }
